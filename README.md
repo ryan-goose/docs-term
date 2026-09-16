@@ -69,14 +69,19 @@ Use the toolbar **Highlight** button (or **Format → Highlight color** / **View
 | **Solarized light / dark** | Solarized themes |
 | **No cell backgrounds** | Toggle: rewrite SGR bg → `49` (default) **before** `term.write`; keeps fg colors; page stays white |
 
-Prefs (theme, no-bg, dark chrome, page width/margins, layout-edit, font size/family, zoom, ruler/chrome, panel open state) persist in `localStorage` (`docs-term-prefs`) and sync to `~/.config/docs-term/prefs.json`. Named sessions, bookmarks, comments, and SSH profiles **dual-write** to `localStorage` and `~/.config/docs-term/<name>.json` via `/api/config/:name` (localStorage first, then disk; load merges both by id / newest timestamp).
+Prefs (theme, no-bg, dark chrome, page width/height/margins, layout-edit, pageless, follow-output, scrollback lines, smooth scroll, font size/family, zoom, ruler/chrome, panel open state) persist in `localStorage` (`docs-term-prefs`) and sync to `~/.config/docs-term/prefs.json`. Named sessions, bookmarks, comments, and SSH profiles **dual-write** to `localStorage` and `~/.config/docs-term/<name>.json` via `/api/config/:name` (localStorage first, then disk; load merges both by id / newest timestamp).
 
 
 ## New: paste suggestions, page layout, dark chrome
 
 - **Multiline paste → suggestion mode** (default): queued lines with Confirm / Skip / Confirm all / Cancel; Confirm all walks remaining lines sequentially. Single-line paste is unchanged.
-- **Settings / Page setup**: enter layout edit mode to drag the white page wider/narrower; set margins like Docs page setup; persisted.
+- **Settings / Page setup**: **Edit** turns on drag mode for page edges (width/height) and margin guides; numeric fields stay in sync; persisted.
 - **Dark mode**: Docs-like dark chrome for bars, menus, canvas, and side panels (orthogonal to terminal Highlight+ themes).
+
+## New: pageless + scrolling
+
+- **Pageless**: Docs-style continuous scroll — no forced letter page height / page breaks (`body.pageless`). Toggle in Settings / Page setup; persisted.
+- **Scrolling**: follow PTY output (auto-stick to bottom unless you scroll up), scrollback history size (lines, default 5000), optional smooth scroll. Follow is wired into the live `term.write` / PTY path.
 
 ## Features
 
@@ -90,7 +95,7 @@ Prefs (theme, no-bg, dark chrome, page width/margins, layout-edit, font size/fam
 | 8 | **SSH profile picker** | File → Open connection…; writes `ssh user@host` into the PTY; profiles local only (no secrets in git) |
 | 10 | **Export PDF / .docx** | File → Export as PDF… / Export as .docx… (client-side) |
 | 11 | **Smart paste / suggestion mode** | Multiline paste opens a Docs-like queue: **Confirm / Skip / Confirm all / Cancel**; each Confirm sends one line + newline via **bracketed paste**. Single-line paste stays immediate. |
-| 12 | **Page layout / Settings** | Tools → Settings or File → Page setup: edit/layout mode (drag page edges), margins (T/B/L/R), page width; prefs in `localStorage` + `~/.config/docs-term/prefs.json` |
+| 12 | **Page layout / Settings** | Tools → Settings or File → Page setup: **Edit** drag mode (page edges + margin guides), page width/height, margins, **pageless**, follow-output / scrollback / smooth scroll; prefs in `localStorage` + `~/.config/docs-term/prefs.json` |
 | 13 | **Dark chrome** | View → Dark mode (also Highlight+ / Settings): full Google Docs–style dark UI (top bar, menus, canvas, side panels). Terminal themes + no-cell-bg still apply to the page surface. |
 | 17 | **Keyboard cheat-sheet** | Help → Keyboard shortcuts (`Ctrl/Cmd+/`) |
 | 20 | **Artix .desktop launcher** | `packaging/docs-term.desktop` → install with `scripts/install-desktop.sh` |

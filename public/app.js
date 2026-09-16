@@ -166,11 +166,14 @@
 
   const DEFAULT_LAYOUT = {
     pageWidth: 816,
+    pageHeight: 1056,
     marginTop: 96,
     marginRight: 96,
     marginBottom: 96,
     marginLeft: 96,
   };
+
+  const DEFAULT_SCROLLBACK = 5000;
 
   const state = {
     fontSize: Number(prefs.fontSize) || 14,
@@ -189,11 +192,16 @@
     cwd: prefs.cwd || '',
     darkChrome: !!prefs.darkChrome,
     layoutEdit: !!prefs.layoutEdit,
+    pageless: !!prefs.pageless,
     pageWidth: prefs.pageWidth != null ? Number(prefs.pageWidth) : DEFAULT_LAYOUT.pageWidth,
+    pageHeight: prefs.pageHeight != null ? Number(prefs.pageHeight) : DEFAULT_LAYOUT.pageHeight,
     marginTop: prefs.marginTop != null ? Number(prefs.marginTop) : DEFAULT_LAYOUT.marginTop,
     marginRight: prefs.marginRight != null ? Number(prefs.marginRight) : DEFAULT_LAYOUT.marginRight,
     marginBottom: prefs.marginBottom != null ? Number(prefs.marginBottom) : DEFAULT_LAYOUT.marginBottom,
     marginLeft: prefs.marginLeft != null ? Number(prefs.marginLeft) : DEFAULT_LAYOUT.marginLeft,
+    followOutput: prefs.followOutput !== false,
+    scrollbackLines: Math.max(500, Math.min(50000, Number(prefs.scrollbackLines) || DEFAULT_SCROLLBACK)),
+    smoothScroll: !!prefs.smoothScroll,
   };
 
   let sessions = [];
@@ -231,11 +239,16 @@
       cwd: state.cwd,
       darkChrome: state.darkChrome,
       layoutEdit: state.layoutEdit,
+      pageless: state.pageless,
       pageWidth: state.pageWidth,
+      pageHeight: state.pageHeight,
       marginTop: state.marginTop,
       marginRight: state.marginRight,
       marginBottom: state.marginBottom,
       marginLeft: state.marginLeft,
+      followOutput: state.followOutput,
+      scrollbackLines: state.scrollbackLines,
+      smoothScroll: state.smoothScroll,
     };
   }
 
@@ -382,9 +395,38 @@
 
   window.__docsTermStripBg = stripCellBackgrounds;
 
+  let stickToBottom = true;
+
+  function isViewportAtBottom() {
+    try {
+      const buf = term.buffer.active;
+      return buf.viewportY >= buf.baseY;
+    } catch (_) {
+      return true;
+    }
+  }
+
   function writeToTerm(data) {
     if (state.noCellBg) data = stripCellBackgrounds(data);
-    term.write(data);
+    if (!state.followOutput) {
+      let y = 0;
+      try {
+        y = term.buffer.active.viewportY;
+      } catch (_) {}
+      term.write(data, () => {
+        try {
+          term.scrollToLine(y);
+        } catch (_) {}
+      });
+      return;
+    }
+    term.write(data, () => {
+      if (stickToBottom) {
+        try {
+          term.scrollToBottom();
+        } catch (_) {}
+      }
+    });
   }
 
   const TerminalCtor = window.Terminal;
@@ -403,12 +445,18 @@
     fontWeight: state.bold ? 'bold' : 'normal',
     theme: baseTheme,
     allowProposedApi: true,
-    scrollback: 5000,
+    scrollback: state.scrollbackLines,
     convertEol: false,
   });
   const fitAddon = new FitAddonCtor();
   term.loadAddon(fitAddon);
   term.open(document.getElementById('terminal'));
+
+  try {
+    term.onScroll(() => {
+      stickToBottom = isViewportAtBottom();
+    });
+  } catch (_) {}
 
   let socket = null;
   let reconnectTimer = null;
@@ -624,15 +672,30 @@
     snack(state.noCellBg ? 'No cell backgrounds: on (SGR bg → default)' : 'No cell backgrounds: off');
   }
 
+  function syncLayoutEditButton() {
+    const btn = document.getElementById('settings-layout-edit');
+    if (!btn) return;
+    btn.textContent = state.layoutEdit ? 'Done editing' : 'Edit';
+    btn.classList.toggle('btn-filled', !state.layoutEdit);
+    btn.classList.toggle('btn-text', state.layoutEdit);
+  }
+
   function applyPageLayout() {
     const root = document.documentElement;
     const w = Math.max(480, Math.min(1600, Number(state.pageWidth) || DEFAULT_LAYOUT.pageWidth));
+    const h = Math.max(480, Math.min(2400, Number(state.pageHeight) || DEFAULT_LAYOUT.pageHeight));
     state.pageWidth = w;
+    state.pageHeight = h;
+    state.marginTop = Math.max(0, Math.min(240, Number(state.marginTop) || 0));
+    state.marginRight = Math.max(0, Math.min(240, Number(state.marginRight) || 0));
+    state.marginBottom = Math.max(0, Math.min(240, Number(state.marginBottom) || 0));
+    state.marginLeft = Math.max(0, Math.min(240, Number(state.marginLeft) || 0));
     root.style.setProperty('--page-width', w + 'px');
-    root.style.setProperty('--page-margin-top', (Number(state.marginTop) || 0) + 'px');
-    root.style.setProperty('--page-margin-right', (Number(state.marginRight) || 0) + 'px');
-    root.style.setProperty('--page-margin-bottom', (Number(state.marginBottom) || 0) + 'px');
-    root.style.setProperty('--page-margin-left', (Number(state.marginLeft) || 0) + 'px');
+    root.style.setProperty('--page-min-height', h + 'px');
+    root.style.setProperty('--page-margin-top', state.marginTop + 'px');
+    root.style.setProperty('--page-margin-right', state.marginRight + 'px');
+    root.style.setProperty('--page-margin-bottom', state.marginBottom + 'px');
+    root.style.setProperty('--page-margin-left', state.marginLeft + 'px');
     const rulerInner = document.querySelector('.ruler-inner');
     if (rulerInner) rulerInner.style.width = w + 'px';
     requestAnimationFrame(sendResize);
@@ -643,7 +706,49 @@
     document.body.classList.toggle('layout-edit', state.layoutEdit);
     const cb = document.getElementById('settings-layout-mode');
     if (cb) cb.checked = state.layoutEdit;
+    syncLayoutEditButton();
     savePrefs();
+  }
+
+  function setPageless(on) {
+    state.pageless = !!on;
+    document.body.classList.toggle('pageless', state.pageless);
+    const cb = document.getElementById('settings-pageless');
+    if (cb) cb.checked = state.pageless;
+    const hEl = document.getElementById('settings-page-height');
+    if (hEl) hEl.disabled = state.pageless;
+    savePrefs();
+    requestAnimationFrame(sendResize);
+  }
+
+  function setFollowOutput(on) {
+    state.followOutput = !!on;
+    const cb = document.getElementById('settings-follow-output');
+    if (cb) cb.checked = state.followOutput;
+    if (state.followOutput) stickToBottom = isViewportAtBottom();
+    savePrefs();
+  }
+
+  function setSmoothScroll(on) {
+    state.smoothScroll = !!on;
+    document.body.classList.toggle('smooth-scroll', state.smoothScroll);
+    const cb = document.getElementById('settings-smooth-scroll');
+    if (cb) cb.checked = state.smoothScroll;
+    savePrefs();
+  }
+
+  function setScrollbackLines(n, opts) {
+    opts = opts || {};
+    const next = Math.max(500, Math.min(50000, Math.round(Number(n) || DEFAULT_SCROLLBACK)));
+    state.scrollbackLines = next;
+    try {
+      term.options.scrollback = next;
+    } catch (_) {}
+    const numEl = document.getElementById('settings-scrollback');
+    const rangeEl = document.getElementById('settings-scrollback-range');
+    if (numEl && opts.syncForm !== false) numEl.value = String(next);
+    if (rangeEl && opts.syncForm !== false) rangeEl.value = String(next);
+    if (!opts.skipSave) savePrefs();
   }
 
   function setDarkChrome(on) {
@@ -659,28 +764,54 @@
     const w = document.getElementById('settings-page-width');
     if (!w) return;
     w.value = String(state.pageWidth);
+    const h = document.getElementById('settings-page-height');
+    if (h) {
+      h.value = String(state.pageHeight);
+      h.disabled = state.pageless;
+    }
     document.getElementById('settings-margin-top').value = String(state.marginTop);
     document.getElementById('settings-margin-bottom').value = String(state.marginBottom);
     document.getElementById('settings-margin-left').value = String(state.marginLeft);
     document.getElementById('settings-margin-right').value = String(state.marginRight);
     document.getElementById('settings-layout-mode').checked = state.layoutEdit;
+    const pageless = document.getElementById('settings-pageless');
+    if (pageless) pageless.checked = state.pageless;
+    const follow = document.getElementById('settings-follow-output');
+    if (follow) follow.checked = state.followOutput;
+    const smooth = document.getElementById('settings-smooth-scroll');
+    if (smooth) smooth.checked = state.smoothScroll;
+    const sb = document.getElementById('settings-scrollback');
+    const sbr = document.getElementById('settings-scrollback-range');
+    if (sb) sb.value = String(state.scrollbackLines);
+    if (sbr) sbr.value = String(state.scrollbackLines);
     document.getElementById('settings-dark').checked = state.darkChrome;
     document.getElementById('settings-no-bg').checked = state.noCellBg;
+    syncLayoutEditButton();
   }
 
   function readSettingsForm() {
     const num = (id, fallback, min, max) => {
-      const v = Number(document.getElementById(id).value);
+      const el = document.getElementById(id);
+      if (!el) return fallback;
+      const v = Number(el.value);
       if (!Number.isFinite(v)) return fallback;
       return Math.max(min, Math.min(max, v));
     };
     state.pageWidth = num('settings-page-width', state.pageWidth, 480, 1600);
+    state.pageHeight = num('settings-page-height', state.pageHeight, 480, 2400);
     state.marginTop = num('settings-margin-top', state.marginTop, 0, 240);
     state.marginBottom = num('settings-margin-bottom', state.marginBottom, 0, 240);
     state.marginLeft = num('settings-margin-left', state.marginLeft, 0, 240);
     state.marginRight = num('settings-margin-right', state.marginRight, 0, 240);
     applyPageLayout();
     setLayoutEdit(document.getElementById('settings-layout-mode').checked);
+    const pagelessEl = document.getElementById('settings-pageless');
+    if (pagelessEl) setPageless(pagelessEl.checked);
+    const followEl = document.getElementById('settings-follow-output');
+    if (followEl) setFollowOutput(followEl.checked);
+    const smoothEl = document.getElementById('settings-smooth-scroll');
+    if (smoothEl) setSmoothScroll(smoothEl.checked);
+    setScrollbackLines(num('settings-scrollback', state.scrollbackLines, 500, 50000), { skipSave: true });
     setDarkChrome(document.getElementById('settings-dark').checked);
     const nobg = document.getElementById('settings-no-bg').checked;
     if (nobg !== state.noCellBg) setNoCellBg(nobg);
@@ -700,56 +831,136 @@
 
   function resetLayoutDefaults() {
     state.pageWidth = DEFAULT_LAYOUT.pageWidth;
+    state.pageHeight = DEFAULT_LAYOUT.pageHeight;
     state.marginTop = DEFAULT_LAYOUT.marginTop;
     state.marginRight = DEFAULT_LAYOUT.marginRight;
     state.marginBottom = DEFAULT_LAYOUT.marginBottom;
     state.marginLeft = DEFAULT_LAYOUT.marginLeft;
+    state.pageless = false;
+    document.body.classList.remove('pageless');
     fillSettingsForm();
     applyPageLayout();
     savePrefs();
     snack('Page layout reset');
   }
 
+  function syncMarginFields() {
+    const map = {
+      'settings-page-width': state.pageWidth,
+      'settings-page-height': state.pageHeight,
+      'settings-margin-top': state.marginTop,
+      'settings-margin-bottom': state.marginBottom,
+      'settings-margin-left': state.marginLeft,
+      'settings-margin-right': state.marginRight,
+    };
+    Object.keys(map).forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.value = String(map[id]);
+    });
+  }
+
   function initPageResizeHandles() {
     const page = document.getElementById('page');
-    const left = document.getElementById('page-resize-left');
-    const right = document.getElementById('page-resize-right');
-    if (!page || !left || !right) return;
+    if (!page) return;
 
     function onMove(e) {
       if (!layoutDrag) return;
-      const canvas = document.getElementById('canvas');
-      const rect = canvas.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      const half = Math.abs(e.clientX - centerX);
-      const next = Math.max(480, Math.min(1600, Math.round(half * 2)));
-      // Snap to 8px
-      state.pageWidth = Math.round(next / 8) * 8;
-      applyPageLayout();
-      const wEl = document.getElementById('settings-page-width');
-      if (wEl) wEl.value = String(state.pageWidth);
+      const kind = layoutDrag.kind;
+      const pageRect = page.getBoundingClientRect();
+
+      if (kind === 'page-width') {
+        const canvas = document.getElementById('canvas');
+        const rect = canvas.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const half = Math.abs(e.clientX - centerX);
+        const next = Math.max(480, Math.min(1600, Math.round(half * 2)));
+        state.pageWidth = Math.round(next / 8) * 8;
+        applyPageLayout();
+        syncMarginFields();
+        return;
+      }
+
+      if (kind === 'page-height') {
+        if (state.pageless) return;
+        const top = pageRect.top;
+        let h;
+        if (layoutDrag.side === 'top') {
+          h = Math.round(pageRect.bottom - e.clientY);
+        } else {
+          h = Math.round(e.clientY - top);
+        }
+        h = Math.max(480, Math.min(2400, h));
+        state.pageHeight = Math.round(h / 8) * 8;
+        applyPageLayout();
+        syncMarginFields();
+        return;
+      }
+
+      if (kind === 'margin') {
+        const side = layoutDrag.side;
+        let v;
+        if (side === 'top') {
+          v = Math.round(e.clientY - pageRect.top);
+        } else if (side === 'bottom') {
+          v = Math.round(pageRect.bottom - e.clientY);
+        } else if (side === 'left') {
+          v = Math.round(e.clientX - pageRect.left);
+        } else {
+          v = Math.round(pageRect.right - e.clientX);
+        }
+        v = Math.max(0, Math.min(240, v));
+        v = Math.round(v / 4) * 4;
+        if (side === 'top') state.marginTop = v;
+        else if (side === 'bottom') state.marginBottom = v;
+        else if (side === 'left') state.marginLeft = v;
+        else state.marginRight = v;
+        applyPageLayout();
+        syncMarginFields();
+      }
     }
 
     function onUp() {
       if (!layoutDrag) return;
       layoutDrag = null;
-      document.body.classList.remove('layout-dragging');
+      document.body.classList.remove('layout-dragging', 'layout-drag-ew', 'layout-drag-ns');
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       savePrefs();
     }
 
-    function start(side, e) {
+    function start(drag, e) {
       if (!state.layoutEdit) return;
       e.preventDefault();
-      layoutDrag = { side: side };
+      e.stopPropagation();
+      layoutDrag = drag;
       document.body.classList.add('layout-dragging');
+      const axis = drag.kind === 'page-height' || drag.side === 'top' || drag.side === 'bottom'
+        ? 'layout-drag-ns'
+        : 'layout-drag-ew';
+      if (drag.kind === 'margin') {
+        document.body.classList.add(
+          drag.side === 'top' || drag.side === 'bottom' ? 'layout-drag-ns' : 'layout-drag-ew'
+        );
+      } else {
+        document.body.classList.add(axis);
+      }
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
     }
 
-    left.addEventListener('pointerdown', (e) => start('left', e));
-    right.addEventListener('pointerdown', (e) => start('right', e));
+    const left = document.getElementById('page-resize-left');
+    const right = document.getElementById('page-resize-right');
+    const top = document.getElementById('page-resize-top');
+    const bottom = document.getElementById('page-resize-bottom');
+    if (left) left.addEventListener('pointerdown', (e) => start({ kind: 'page-width', side: 'left' }, e));
+    if (right) right.addEventListener('pointerdown', (e) => start({ kind: 'page-width', side: 'right' }, e));
+    if (top) top.addEventListener('pointerdown', (e) => start({ kind: 'page-height', side: 'top' }, e));
+    if (bottom) bottom.addEventListener('pointerdown', (e) => start({ kind: 'page-height', side: 'bottom' }, e));
+
+    ['top', 'bottom', 'left', 'right'].forEach((side) => {
+      const el = document.getElementById('margin-guide-' + side);
+      if (el) el.addEventListener('pointerdown', (e) => start({ kind: 'margin', side: side }, e));
+    });
   }
 
 
@@ -2192,16 +2403,52 @@
   document.getElementById('settings-layout-mode').addEventListener('change', (e) => {
     setLayoutEdit(e.target.checked);
   });
+  const layoutEditBtn = document.getElementById('settings-layout-edit');
+  if (layoutEditBtn) {
+    layoutEditBtn.addEventListener('click', () => {
+      setLayoutEdit(!state.layoutEdit);
+      if (state.layoutEdit) {
+        snack('Drag page edges and margin guides');
+        // Keep settings open so numeric fields stay visible while editing
+      }
+    });
+  }
+  const pagelessEl = document.getElementById('settings-pageless');
+  if (pagelessEl) {
+    pagelessEl.addEventListener('change', (e) => setPageless(e.target.checked));
+  }
+  const followEl = document.getElementById('settings-follow-output');
+  if (followEl) {
+    followEl.addEventListener('change', (e) => setFollowOutput(e.target.checked));
+  }
+  const smoothEl = document.getElementById('settings-smooth-scroll');
+  if (smoothEl) {
+    smoothEl.addEventListener('change', (e) => setSmoothScroll(e.target.checked));
+  }
+  const sbNum = document.getElementById('settings-scrollback');
+  const sbRange = document.getElementById('settings-scrollback-range');
+  if (sbNum) {
+    sbNum.addEventListener('change', () => setScrollbackLines(sbNum.value));
+  }
+  if (sbRange) {
+    sbRange.addEventListener('input', () => {
+      setScrollbackLines(sbRange.value, { skipSave: true });
+    });
+    sbRange.addEventListener('change', () => setScrollbackLines(sbRange.value));
+  }
   document.getElementById('settings-dark').addEventListener('change', (e) => {
     setDarkChrome(e.target.checked);
   });
   document.getElementById('settings-no-bg').addEventListener('change', (e) => {
     setNoCellBg(e.target.checked);
   });
-  ['settings-page-width', 'settings-margin-top', 'settings-margin-bottom', 'settings-margin-left', 'settings-margin-right'].forEach((id) => {
-    document.getElementById(id).addEventListener('change', () => {
-      readSettingsForm();
-    });
+  ['settings-page-width', 'settings-page-height', 'settings-margin-top', 'settings-margin-bottom', 'settings-margin-left', 'settings-margin-right'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('change', () => {
+        readSettingsForm();
+      });
+    }
   });
   document.getElementById('settings-modal').addEventListener('click', (e) => {
     if (e.target.id === 'settings-modal') closeSettings(true);
@@ -2344,8 +2591,12 @@
   applyPageLayout();
   document.body.classList.toggle('dark-chrome', state.darkChrome);
   document.body.classList.toggle('layout-edit', state.layoutEdit);
+  document.body.classList.toggle('pageless', state.pageless);
+  document.body.classList.toggle('smooth-scroll', state.smoothScroll);
+  syncLayoutEditButton();
   syncThemeChecks();
   initPageResizeHandles();
+  setScrollbackLines(state.scrollbackLines, { skipSave: true });
 
   (async function bootStores() {
     const genAtStart = storeWriteGen;
@@ -2376,7 +2627,7 @@
       const diskPrefs = await configGet('prefs');
       if (diskPrefs && typeof diskPrefs === 'object') {
         let changed = false;
-        ['darkChrome', 'layoutEdit', 'pageWidth', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'noCellBg'].forEach((k) => {
+        ['darkChrome', 'layoutEdit', 'pageless', 'pageWidth', 'pageHeight', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'noCellBg', 'followOutput', 'scrollbackLines', 'smoothScroll'].forEach((k) => {
           if (prefs[k] === undefined && diskPrefs[k] !== undefined) {
             state[k] = diskPrefs[k];
             changed = true;
@@ -2386,6 +2637,10 @@
           applyPageLayout();
           document.body.classList.toggle('dark-chrome', !!state.darkChrome);
           document.body.classList.toggle('layout-edit', !!state.layoutEdit);
+          document.body.classList.toggle('pageless', !!state.pageless);
+          document.body.classList.toggle('smooth-scroll', !!state.smoothScroll);
+          setScrollbackLines(state.scrollbackLines, { skipSave: true });
+          syncLayoutEditButton();
           syncThemeChecks();
           savePrefs();
         }

@@ -163,8 +163,14 @@
     </aside>
     <main class="canvas" id="canvas">
       <div class="page" id="page">
-        <div class="page-resize page-resize-left" id="page-resize-left" title="Drag to resize page"></div>
-        <div class="page-resize page-resize-right" id="page-resize-right" title="Drag to resize page"></div>
+        <div class="page-resize page-resize-left" id="page-resize-left" title="Drag to resize page width"></div>
+        <div class="page-resize page-resize-right" id="page-resize-right" title="Drag to resize page width"></div>
+        <div class="page-resize page-resize-top" id="page-resize-top" title="Drag to resize page height"></div>
+        <div class="page-resize page-resize-bottom" id="page-resize-bottom" title="Drag to resize page height"></div>
+        <div class="margin-guide margin-guide-top" id="margin-guide-top" title="Drag top margin"></div>
+        <div class="margin-guide margin-guide-bottom" id="margin-guide-bottom" title="Drag bottom margin"></div>
+        <div class="margin-guide margin-guide-left" id="margin-guide-left" title="Drag left margin"></div>
+        <div class="margin-guide margin-guide-right" id="margin-guide-right" title="Drag right margin"></div>
         <div class="page-body" id="page-body">
           <div id="terminal"></div>
         </div>
@@ -518,15 +524,34 @@
     <p class="find-note">Layout and chrome prefs sync to <code>localStorage</code> and <code>~/.config/docs-term/prefs.json</code>.</p>
 
     <h3 class="settings-h">Page layout</h3>
+    <div class="settings-row settings-edit-row">
+      <button type="button" class="btn-filled" id="settings-layout-edit">Edit</button>
+      <label class="settings-check"><input type="checkbox" id="settings-layout-mode"> Layout edit mode (drag page edges + margins)</label>
+    </div>
+    <p class="find-note" id="settings-layout-hint">With Edit on, drag blue page edges (size) and dashed margin guides on the canvas. Numeric fields stay in sync.</p>
     <div class="settings-row">
-      <label class="settings-check"><input type="checkbox" id="settings-layout-mode"> Edit layout mode (drag page edges)</label>
+      <label class="settings-check"><input type="checkbox" id="settings-pageless"> Pageless (continuous scroll — no page breaks / forced page height)</label>
     </div>
     <div class="form-grid settings-grid">
       <label>Page width (px)<input class="share-field" id="settings-page-width" type="number" min="480" max="1600" step="8"></label>
+      <label>Page height (px)<input class="share-field" id="settings-page-height" type="number" min="480" max="2400" step="8" title="Used when pageless is off"></label>
       <label>Margin top (px)<input class="share-field" id="settings-margin-top" type="number" min="0" max="240" step="4"></label>
       <label>Margin bottom (px)<input class="share-field" id="settings-margin-bottom" type="number" min="0" max="240" step="4"></label>
       <label>Margin left (px)<input class="share-field" id="settings-margin-left" type="number" min="0" max="240" step="4"></label>
       <label>Margin right (px)<input class="share-field" id="settings-margin-right" type="number" min="0" max="240" step="4"></label>
+    </div>
+
+    <h3 class="settings-h">Scrolling</h3>
+    <div class="settings-row">
+      <label class="settings-check"><input type="checkbox" id="settings-follow-output" checked> Auto-scroll focused on bottom (follow PTY output)</label>
+    </div>
+    <p class="find-note">When on, new output sticks to the bottom unless you scroll up; returning to the bottom resumes follow. When off, scroll position stays put.</p>
+    <div class="form-grid settings-grid">
+      <label>Scrollback lines (history)<input class="share-field" id="settings-scrollback" type="number" min="500" max="50000" step="500"></label>
+      <label>Scrollback (slider)<input class="share-field settings-range" id="settings-scrollback-range" type="range" min="500" max="50000" step="500"></label>
+    </div>
+    <div class="settings-row">
+      <label class="settings-check"><input type="checkbox" id="settings-smooth-scroll"> Smooth scroll</label>
     </div>
 
     <h3 class="settings-h">Appearance</h3>
