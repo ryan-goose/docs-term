@@ -3,6 +3,12 @@
   'use strict';
 
   const PREFS_KEY = 'docs-term-prefs';
+  const LS = {
+    sessions: 'docs-term-sessions',
+    bookmarks: 'docs-term-bookmarks',
+    comments: 'docs-term-comments',
+    ssh: 'docs-term-ssh-profiles',
+  };
 
   const COLORS = [
     '#000000', '#434343', '#666666', '#999999', '#b7b7b7', '#cccccc', '#d9d9d9', '#efefef', '#f3f3f3', '#ffffff',
@@ -14,7 +20,6 @@
     '#85200c', '#990000', '#b45f06', '#bf9000', '#38761d', '#134f5c', '#1155cc', '#0b5394', '#351c75', '#741b47',
     '#5b0f00', '#660000', '#783f04', '#7f6000', '#274e13', '#0c343d', '#1c4587', '#073763', '#20124d', '#4c1130',
   ];
-
   const THEMES = {
     docs: {
       background: '#ffffff',
@@ -147,6 +152,7 @@
 
   const FONT_NAMES = Object.keys(FONT_STACKS);
 
+
   function loadPrefs() {
     try {
       const raw = localStorage.getItem(PREFS_KEY);
@@ -169,7 +175,26 @@
     chrome: prefs.chrome !== false,
     noCellBg: !!prefs.noCellBg,
     zoom: Number(prefs.zoom) || 100,
+    outlineOpen: !!prefs.outlineOpen,
+    commentsOpen: !!prefs.commentsOpen,
+    sessionId: prefs.sessionId || null,
+    cwd: prefs.cwd || '',
   };
+
+  let sessions = [];
+  let bookmarks = [];
+  let comments = [];
+  let sshProfiles = [];
+  let lastCommand = '';
+  let inputLineBuf = '';
+  let pendingPaste = null;
+  let findMatches = [];
+  let findIndex = -1;
+  let outlineTimer = null;
+
+  function uid() {
+    return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  }
 
   function savePrefs() {
     try {
@@ -185,11 +210,65 @@
           ruler: state.ruler,
           chrome: state.chrome,
           zoom: state.zoom,
+          outlineOpen: state.outlineOpen,
+          commentsOpen: state.commentsOpen,
+          sessionId: state.sessionId,
+          cwd: state.cwd,
         })
       );
+    } catch (_) {}
+  }
+
+  function lsGet(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      return JSON.parse(raw);
     } catch (_) {
-      /* ignore quota */
+      return fallback;
     }
+  }
+
+  function lsSet(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (_) {}
+  }
+
+  async function configGet(name) {
+    try {
+      const res = await fetch('/api/config/' + name);
+      if (!res.ok) return null;
+      const body = await res.json();
+      return body.data;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function configPut(name, data) {
+    try {
+      await fetch('/api/config/' + name, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: data }),
+      });
+    } catch (_) {}
+  }
+
+  async function loadStore(name, lsKey, fallback) {
+    const local = lsGet(lsKey, fallback);
+    const remote = await configGet(name);
+    if (remote == null) return local || fallback;
+    if (Array.isArray(remote) && Array.isArray(local)) {
+      return remote.length >= local.length ? remote : local;
+    }
+    return remote;
+  }
+
+  async function persistStore(name, lsKey, data) {
+    lsSet(lsKey, data);
+    await configPut(name, data);
   }
 
   /**
@@ -243,7 +322,6 @@
     return out;
   }
 
-  // Expose for smoke tests / debugging
   window.__docsTermStripBg = stripCellBackgrounds;
 
   function writeToTerm(data) {
@@ -276,8 +354,6 @@
 
   let socket = null;
   let reconnectTimer = null;
-  let findMatches = [];
-  let findIndex = -1;
 
   function wsUrl() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -299,9 +375,7 @@
   function sendResize() {
     try {
       fitAddon.fit();
-    } catch (_) {
-      /* not attached yet */
-    }
+    } catch (_) {}
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
     }
@@ -324,11 +398,10 @@
             writeToTerm('\r\n[process exited with code ' + msg.exitCode + ']\r\n');
             return;
           }
-        } catch (_) {
-          /* fall through */
-        }
+        } catch (_) {}
       }
       writeToTerm(typeof data === 'string' ? data : new Uint8Array(data));
+      refreshOutlineSoon();
     });
     socket.addEventListener('close', () => {
       setConn(false, 'Disconnected');
@@ -343,10 +416,45 @@
     });
   }
 
-  term.onData((data) => {
+  function sendInput(data) {
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: 'input', data: data }));
     }
+  }
+
+  function trackTypedInput(data) {
+    for (let i = 0; i < data.length; i++) {
+      const ch = data.charAt(i);
+      const code = data.charCodeAt(i);
+      if (ch === '\r' || ch === '\n') {
+        const cmd = inputLineBuf.trim();
+        if (cmd) {
+          lastCommand = cmd;
+          const m = cmd.match(/^cd\s+(.+)$/);
+          if (m) {
+            let p = m[1].trim().replace(/^['"]|['"]$/g, '');
+            if (p === '~') p = '';
+            state.cwd = p;
+            savePrefs();
+          }
+          refreshOutlineSoon();
+        }
+        inputLineBuf = '';
+      } else if (code === 127 || code === 8) {
+        inputLineBuf = inputLineBuf.slice(0, -1);
+      } else if (code === 21) {
+        inputLineBuf = '';
+      } else if (code === 23) {
+        inputLineBuf = inputLineBuf.replace(/\S*\s*$/, '');
+      } else if (code >= 32) {
+        inputLineBuf += ch;
+      }
+    }
+  }
+
+  term.onData((data) => {
+    trackTypedInput(data);
+    sendInput(data);
   });
 
   term.onResize(() => {
@@ -359,8 +467,15 @@
     document.querySelectorAll('[data-theme]').forEach((el) => {
       el.classList.toggle('check', el.getAttribute('data-theme') === state.themeName);
     });
-    const noBg = document.querySelectorAll('[data-action="toggle-no-bg"]');
-    noBg.forEach((el) => el.classList.toggle('check', state.noCellBg));
+    document.querySelectorAll('[data-action="toggle-no-bg"]').forEach((el) =>
+      el.classList.toggle('check', state.noCellBg)
+    );
+    document.querySelectorAll('[data-action="toggle-outline"]').forEach((el) =>
+      el.classList.toggle('check', state.outlineOpen)
+    );
+    document.querySelectorAll('[data-action="toggle-comments"]').forEach((el) =>
+      el.classList.toggle('check', state.commentsOpen)
+    );
   }
 
   function applyTheme(name) {
@@ -422,25 +537,20 @@
     }
     const sel = document.getElementById('zoom-select');
     if (sel) {
-      const opt = Array.from(sel.options).find((o) => Number(o.value) === pct);
-      if (opt) sel.value = String(pct);
-      else {
-        // allow arbitrary from menu
-        let found = false;
-        for (let i = 0; i < sel.options.length; i++) {
-          if (sel.options[i].value === String(pct)) {
-            found = true;
-            break;
-          }
+      let found = false;
+      for (let i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === String(pct)) {
+          found = true;
+          break;
         }
-        if (!found) {
-          const o = document.createElement('option');
-          o.value = String(pct);
-          o.textContent = pct + '%';
-          sel.appendChild(o);
-        }
-        sel.value = String(pct);
       }
+      if (!found) {
+        const o = document.createElement('option');
+        o.value = String(pct);
+        o.textContent = pct + '%';
+        sel.appendChild(o);
+      }
+      sel.value = String(pct);
     }
     savePrefs();
     requestAnimationFrame(sendResize);
@@ -472,27 +582,98 @@
     return lines.join('\n') + (lines.length ? '\n' : '');
   }
 
-  function downloadTranscript() {
-    const text = getTranscript();
-    const title = (document.getElementById('doc-title').value || 'terminal').replace(/[^\w\- .]+/g, '_');
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  function getTranscriptLines() {
+    const buf = term.buffer.active;
+    const lines = [];
+    for (let i = 0; i < buf.length; i++) {
+      const line = buf.getLine(i);
+      lines.push({ row: i, text: line ? line.translateToString(true) : '' });
+    }
+    return lines;
+  }
+
+  function docTitle() {
+    return (document.getElementById('doc-title').value || 'Untitled document').trim() || 'Untitled document';
+  }
+
+  function safeFilename(name) {
+    return name.replace(/[^\w\- .]+/g, '_');
+  }
+
+  function downloadBlob(blob, filename) {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = title + '-transcript.txt';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => {
       URL.revokeObjectURL(a.href);
       a.remove();
     }, 500);
+  }
+
+  function downloadTranscript() {
+    const text = getTranscript();
+    downloadBlob(new Blob([text], { type: 'text/plain;charset=utf-8' }), safeFilename(docTitle()) + '-transcript.txt');
     snack('Transcript downloaded');
   }
 
-  function sendInput(data) {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: 'input', data: data }));
+  /* ----- Smart paste (bracketed + multiline confirm) ----- */
+  function bracketedPaste(text) {
+    return '\x1b[200~' + text + '\x1b[201~';
+  }
+
+  function isMultilinePaste(text) {
+    return /[\r\n]/.test(text) && text.replace(/\r\n/g, '\n').split('\n').length > 1;
+  }
+
+  function doPaste(text) {
+    if (!text) return;
+    sendInput(bracketedPaste(text));
+    trackTypedInput(text.endsWith('\n') || text.endsWith('\r') ? text : text);
+  }
+
+  function smartPaste(text) {
+    if (!text) return;
+    if (isMultilinePaste(text)) {
+      pendingPaste = text;
+      const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+      document.getElementById('paste-lines').textContent = String(lines.length);
+      const preview = document.getElementById('paste-preview');
+      preview.textContent = lines.slice(0, 40).join('\n') + (lines.length > 40 ? '\n…' : '');
+      hideMenus();
+      document.getElementById('paste-modal').classList.add('show');
+      return;
+    }
+    doPaste(text);
+  }
+
+  function pasteClipboard() {
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      navigator.clipboard
+        .readText()
+        .then((t) => smartPaste(t))
+        .catch(() => snack('Clipboard paste was blocked by the browser.'));
+    } else {
+      snack('Clipboard paste unavailable');
     }
   }
+
+  // Intercept native paste on the xterm textarea
+  setTimeout(() => {
+    const ta = term.textarea;
+    if (!ta) return;
+    ta.addEventListener(
+      'paste',
+      (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const text = (e.clipboardData || window.clipboardData).getData('text');
+        smartPaste(text);
+      },
+      true
+    );
+  }, 0);
 
   function selectAllBuffer() {
     if (typeof term.selectAll === 'function') {
@@ -516,23 +697,9 @@
     }
   }
 
-  function pasteClipboard() {
-    if (navigator.clipboard && navigator.clipboard.readText) {
-      navigator.clipboard
-        .readText()
-        .then((t) => {
-          if (t) sendInput(t);
-        })
-        .catch(() => snack('Clipboard paste was blocked by the browser.'));
-    } else {
-      snack('Clipboard paste unavailable');
-    }
-  }
-
   function cutSelection() {
     copySelection();
-    // Terminal has no true cut of scrollback; send interrupt as Docs-ish fallback for line edit
-    sendInput('\x15'); // Ctrl+U clear line in many shells
+    sendInput('\x15');
   }
 
   function toggleFullscreen() {
@@ -548,23 +715,22 @@
       document.exitFullscreen();
     }
   }
-
+  /* ----- Find & replace ----- */
   function openFind() {
     hideMenus();
-    const modal = document.getElementById('find-modal');
-    modal.classList.add('show');
-    const input = document.getElementById('find-input');
+    document.getElementById("find-modal").classList.add("show");
+    const input = document.getElementById("find-input");
     input.focus();
     input.select();
   }
 
   function closeFind() {
-    document.getElementById('find-modal').classList.remove('show');
+    document.getElementById("find-modal").classList.remove("show");
     findMatches = [];
     findIndex = -1;
     term.clearSelection();
-    const st = document.getElementById('find-status');
-    if (st) st.textContent = '';
+    const st = document.getElementById("find-status");
+    if (st) st.textContent = "";
   }
 
   function collectFindMatches(q) {
@@ -592,44 +758,698 @@
     if (!findMatches.length) return;
     findIndex = ((idx % findMatches.length) + findMatches.length) % findMatches.length;
     const m = findMatches[findIndex];
-    const buf = term.buffer.active;
-    // Convert buffer row to viewport-relative selection
     try {
       term.scrollToLine(Math.max(0, m.row - 2));
       term.select(m.col, m.row, m.len);
-    } catch (_) {
-      /* older xterm */
-    }
-    const st = document.getElementById('find-status');
-    if (st) st.textContent = findIndex + 1 + ' of ' + findMatches.length;
+    } catch (_) {}
+    const st = document.getElementById("find-status");
+    if (st) st.textContent = findIndex + 1 + " of " + findMatches.length + " (live buffer)";
   }
 
   function runFind(next) {
-    const q = document.getElementById('find-input').value;
+    const q = document.getElementById("find-input").value;
     if (!q) {
       findMatches = [];
       findIndex = -1;
-      document.getElementById('find-status').textContent = '';
+      document.getElementById("find-status").textContent = "";
       return;
     }
     findMatches = collectFindMatches(q);
     if (!findMatches.length) {
-      document.getElementById('find-status').textContent = 'No matches';
+      document.getElementById("find-status").textContent = "No matches";
       term.clearSelection();
       return;
     }
-    if (next === 'prev') jumpToMatch(findIndex <= 0 ? findMatches.length - 1 : findIndex - 1);
+    if (next === "prev") jumpToMatch(findIndex <= 0 ? findMatches.length - 1 : findIndex - 1);
     else jumpToMatch(findIndex + 1);
+  }
+
+  function replaceInTranscript(all) {
+    const find = document.getElementById("find-input").value;
+    const repl = document.getElementById("replace-input").value;
+    if (!find) {
+      snack("Enter text to find");
+      return;
+    }
+    let text = getTranscript();
+    function countOcc(hay, needle) {
+      if (!needle) return 0;
+      let n = 0, from = 0;
+      while (true) {
+        const at = hay.indexOf(needle, from);
+        if (at === -1) break;
+        n++;
+        from = at + needle.length;
+      }
+      return n;
+    }
+    function replaceOcc(hay, needle, replacement, doAll) {
+      if (!needle) return hay;
+      if (!doAll) {
+        const at = hay.indexOf(needle);
+        if (at === -1) return hay;
+        return hay.slice(0, at) + replacement + hay.slice(at + needle.length);
+      }
+      return hay.split(needle).join(replacement);
+    }
+    const before = countOcc(text, find);
+    if (!before) {
+      document.getElementById("find-status").textContent = "No matches in transcript copy";
+      return;
+    }
+    text = replaceOcc(text, find, repl, all);
+    const afterCount = all ? before : 1;
+    downloadBlob(
+      new Blob([text], { type: "text/plain;charset=utf-8" }),
+      safeFilename(docTitle()) + "-replaced.txt"
+    );
+    document.getElementById("find-status").textContent =
+      "Replaced " + afterCount + " in transcript copy (downloaded). Live PTY history unchanged.";
+    snack("Replaced transcript downloaded");
   }
 
   function showAbout() {
     hideMenus();
-    document.getElementById('about-modal').classList.add('show');
+    document.getElementById("about-modal").classList.add("show");
   }
 
   function showShortcuts() {
     hideMenus();
-    document.getElementById('shortcuts-modal').classList.add('show');
+    document.getElementById("shortcuts-modal").classList.add("show");
+  }
+
+  /* ----- Named sessions ----- */
+  async function saveCurrentSession(promptName) {
+    let name = docTitle();
+    if (promptName) {
+      const entered = window.prompt('Session name', name);
+      if (entered == null) return;
+      name = entered.trim() || name;
+      document.getElementById('doc-title').value = name;
+      document.title = name + ' - Google Docs';
+    }
+    const cwd =
+      state.cwd ||
+      (window.prompt('Working directory to restore (optional)', state.cwd || '') || '');
+    state.cwd = cwd;
+    const scrollback = getTranscript();
+    const existing = state.sessionId ? sessions.find((s) => s.id === state.sessionId) : null;
+    const entry = {
+      id: existing ? existing.id : uid(),
+      name: name,
+      cwd: cwd,
+      scrollback: scrollback,
+      savedAt: new Date().toISOString(),
+    };
+    state.sessionId = entry.id;
+    sessions = sessions.filter((s) => s.id !== entry.id);
+    sessions.unshift(entry);
+    if (sessions.length > 40) sessions = sessions.slice(0, 40);
+    await persistStore('sessions', LS.sessions, sessions);
+    savePrefs();
+    snack('Session saved: ' + name);
+    renderSessionsList();
+  }
+
+  async function restoreSession(id) {
+    const s = sessions.find((x) => x.id === id);
+    if (!s) return;
+    state.sessionId = s.id;
+    state.cwd = s.cwd || '';
+    document.getElementById('doc-title').value = s.name || 'Untitled document';
+    document.title = (s.name || 'Untitled document') + ' - Google Docs';
+    term.reset();
+    const text = s.scrollback || '';
+    const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    writeToTerm(normalized.replace(/\n/g, '\r\n'));
+    writeToTerm('\r\n\x1b[90m[restored session — live shell below]\x1b[0m\r\n');
+    if (s.cwd) {
+      const quoted = "'" + String(s.cwd).replace(/'/g, "'\\''") + "'";
+      sendInput('cd ' + quoted + '\r');
+    }
+    savePrefs();
+    hideModal('sessions-modal');
+    snack('Restored: ' + s.name);
+    refreshOutlineSoon();
+    term.focus();
+  }
+
+  async function deleteSession(id) {
+    sessions = sessions.filter((s) => s.id !== id);
+    if (state.sessionId === id) state.sessionId = null;
+    await persistStore('sessions', LS.sessions, sessions);
+    savePrefs();
+    renderSessionsList();
+  }
+
+  function renderSessionsList() {
+    const list = document.getElementById('sessions-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!sessions.length) {
+      list.innerHTML = '<p class="side-hint">No saved sessions yet.</p>';
+      return;
+    }
+    sessions.forEach((s) => {
+      const row = document.createElement('div');
+      row.className = 'list-row';
+      const when = s.savedAt ? new Date(s.savedAt).toLocaleString() : '';
+      row.innerHTML =
+        '<div class="grow"><div class="title"></div><div class="sub"></div></div>' +
+        '<div class="row-actions">' +
+        '<button type="button" data-restore="">Restore</button>' +
+        '<button type="button" class="danger" data-del="">Delete</button>' +
+        '</div>';
+      row.querySelector('.title').textContent = s.name;
+      row.querySelector('.sub').textContent =
+        (s.cwd ? s.cwd + ' · ' : '') + when + ' · ' + ((s.scrollback || '').length) + ' chars';
+      row.querySelector('[data-restore]').addEventListener('click', () => restoreSession(s.id));
+      row.querySelector('[data-del]').addEventListener('click', () => deleteSession(s.id));
+      list.appendChild(row);
+    });
+  }
+
+  function openSessionsModal() {
+    hideMenus();
+    renderSessionsList();
+    document.getElementById('sessions-modal').classList.add('show');
+  }
+
+  function renameSession() {
+    const entered = window.prompt('Rename document / session', docTitle());
+    if (entered == null) return;
+    const name = entered.trim() || 'Untitled document';
+    document.getElementById('doc-title').value = name;
+    document.title = name + ' - Google Docs';
+    snack('Renamed');
+  }
+
+  /* ----- Command bookmarks ----- */
+  async function addBookmark(cmd) {
+    cmd = (cmd || lastCommand || '').trim();
+    if (!cmd) {
+      cmd = window.prompt('Command to bookmark', '') || '';
+      cmd = cmd.trim();
+    }
+    if (!cmd) return;
+    if (bookmarks.some((b) => b.command === cmd)) {
+      snack('Already bookmarked');
+      return;
+    }
+    bookmarks.unshift({ id: uid(), command: cmd, createdAt: new Date().toISOString() });
+    if (bookmarks.length > 100) bookmarks = bookmarks.slice(0, 100);
+    await persistStore('bookmarks', LS.bookmarks, bookmarks);
+    renderBookmarksUI();
+    snack('Bookmarked');
+  }
+
+  async function deleteBookmark(id) {
+    bookmarks = bookmarks.filter((b) => b.id !== id);
+    await persistStore('bookmarks', LS.bookmarks, bookmarks);
+    renderBookmarksUI();
+  }
+
+  function insertBookmark(cmd) {
+    hideMenus();
+    hideModal('bookmarks-modal');
+    sendInput(cmd);
+    term.focus();
+    snack('Inserted bookmark');
+  }
+
+  function renderBookmarksUI() {
+    const menuHost = document.getElementById('bookmarks-menu-items');
+    const empty = document.getElementById('bookmarks-empty');
+    if (menuHost) {
+      menuHost.innerHTML = '';
+      bookmarks.slice(0, 12).forEach((b) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'mi';
+        btn.innerHTML = '<span class="label"></span>';
+        btn.querySelector('.label').textContent = b.command;
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          insertBookmark(b.command);
+        });
+        menuHost.appendChild(btn);
+      });
+      if (empty) empty.style.display = bookmarks.length ? 'none' : '';
+    }
+    const list = document.getElementById('bookmarks-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!bookmarks.length) {
+      list.innerHTML = '<p class="side-hint">No bookmarks yet.</p>';
+      return;
+    }
+    bookmarks.forEach((b) => {
+      const row = document.createElement('div');
+      row.className = 'list-row';
+      row.innerHTML =
+        '<div class="grow"><div class="title"></div></div>' +
+        '<div class="row-actions">' +
+        '<button type="button" data-ins="">Insert</button>' +
+        '<button type="button" class="danger" data-del="">Delete</button>' +
+        '</div>';
+      row.querySelector('.title').textContent = b.command;
+      row.querySelector('[data-ins]').addEventListener('click', () => insertBookmark(b.command));
+      row.querySelector('[data-del]').addEventListener('click', () => deleteBookmark(b.id));
+      list.appendChild(row);
+    });
+  }
+
+  function openBookmarksModal() {
+    hideMenus();
+    renderBookmarksUI();
+    document.getElementById('bookmark-cmd').value = lastCommand || '';
+    document.getElementById('bookmarks-modal').classList.add('show');
+  }
+
+  /* ----- Comments side panel ----- */
+  function setCommentsOpen(on) {
+    state.commentsOpen = !!on;
+    const panel = document.getElementById('comments-panel');
+    if (panel) panel.hidden = !state.commentsOpen;
+    syncThemeChecks();
+    savePrefs();
+    requestAnimationFrame(sendResize);
+  }
+
+  function openCommentModal() {
+    hideMenus();
+    setCommentsOpen(true);
+    const sel = term.getSelection();
+    const lines = getTranscriptLines();
+    let anchor = sel ? sel.split('\n')[0].trim() : '';
+    if (!anchor) {
+      const y = term.buffer.active.baseY + term.buffer.active.cursorY;
+      const hit = lines.find((l) => l.row === y) || lines[lines.length - 1];
+      anchor = hit ? hit.text.trim() : '';
+    }
+    document.getElementById('comment-anchor').value = (anchor || '').slice(0, 200);
+    document.getElementById('comment-body').value = '';
+    document.getElementById('comment-modal').classList.add('show');
+    document.getElementById('comment-body').focus();
+  }
+
+  async function saveComment() {
+    const anchor = document.getElementById('comment-anchor').value.trim();
+    const body = document.getElementById('comment-body').value.trim();
+    if (!body) {
+      snack('Comment is empty');
+      return;
+    }
+    let row = -1;
+    if (anchor) {
+      const lines = getTranscriptLines();
+      const hit = lines.find((l) => l.text.indexOf(anchor) !== -1);
+      if (hit) row = hit.row;
+    }
+    comments.unshift({
+      id: uid(),
+      anchor: anchor,
+      body: body,
+      row: row,
+      createdAt: new Date().toISOString(),
+    });
+    await persistStore('comments', LS.comments, comments);
+    hideModal('comment-modal');
+    renderComments();
+    snack('Comment added');
+  }
+
+  async function deleteComment(id) {
+    comments = comments.filter((c) => c.id !== id);
+    await persistStore('comments', LS.comments, comments);
+    renderComments();
+  }
+
+  function jumpToComment(c) {
+    if (c.row >= 0) {
+      try {
+        term.scrollToLine(Math.max(0, c.row - 2));
+        const line = term.buffer.active.getLine(c.row);
+        const text = line ? line.translateToString(true) : '';
+        const col = c.anchor ? Math.max(0, text.indexOf(c.anchor)) : 0;
+        term.select(col, c.row, Math.min((c.anchor || text).length || 1, 80));
+      } catch (_) {}
+    } else if (c.anchor) {
+      findMatches = collectFindMatches(c.anchor);
+      if (findMatches.length) jumpToMatch(0);
+    }
+    term.focus();
+  }
+
+  function renderComments() {
+    const list = document.getElementById('comments-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!comments.length) {
+      list.innerHTML = '<p class="side-hint">No comments yet. Add sticky notes on commands or lines.</p>';
+      return;
+    }
+    comments.forEach((c) => {
+      const card = document.createElement('div');
+      card.className = 'comment-card';
+      card.innerHTML =
+        '<div class="anchor"></div><div class="body"></div><div class="row">' +
+        '<button type="button" data-jump="">Jump</button>' +
+        '<button type="button" data-del="">Delete</button></div>';
+      card.querySelector('.anchor').textContent = c.anchor || '(no anchor)';
+      card.querySelector('.body').textContent = c.body;
+      card.querySelector('[data-jump]').addEventListener('click', () => jumpToComment(c));
+      card.querySelector('[data-del]').addEventListener('click', () => deleteComment(c.id));
+      list.appendChild(card);
+    });
+  }
+
+  /* ----- Outline from last N commands ----- */
+  function setOutlineOpen(on) {
+    state.outlineOpen = !!on;
+    const panel = document.getElementById('outline-panel');
+    if (panel) panel.hidden = !state.outlineOpen;
+    syncThemeChecks();
+    savePrefs();
+    if (state.outlineOpen) renderOutline();
+    requestAnimationFrame(sendResize);
+  }
+
+  function refreshOutlineSoon() {
+    if (!state.outlineOpen) return;
+    clearTimeout(outlineTimer);
+    outlineTimer = setTimeout(renderOutline, 400);
+  }
+
+  function extractOutline(maxN) {
+    maxN = maxN || 40;
+    const lines = getTranscriptLines();
+    const items = [];
+    const re = /^.*[$#%>]\s+(\S.*)$/;
+    for (let i = 0; i < lines.length; i++) {
+      const text = lines[i].text.replace(/\s+$/, '');
+      if (!text.trim()) continue;
+      let cmd = null;
+      const m = text.match(re);
+      if (m) cmd = m[1].trim();
+      else if (/^\s*(sudo\s+)?(cd|ls|git|npm|node|python|pip|curl|ssh|docker|kubectl|make|cat|vim|nano|rg|grep|find|systemctl)\b/.test(text) && text.length < 200) {
+        cmd = text.trim();
+      }
+      if (cmd && cmd.length > 0 && cmd.length < 180) {
+        items.push({ row: lines[i].row, command: cmd });
+      }
+    }
+    // Prefer unique trailing commands
+    const out = [];
+    const seen = new Set();
+    for (let i = items.length - 1; i >= 0; i--) {
+      const key = items[i].command;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.unshift(items[i]);
+      if (out.length >= maxN) break;
+    }
+    return out;
+  }
+
+  function renderOutline() {
+    const list = document.getElementById('outline-list');
+    if (!list) return;
+    const items = extractOutline(40);
+    list.innerHTML = '';
+    if (!items.length) {
+      list.innerHTML = '<p class="side-hint">No commands detected yet.</p>';
+      return;
+    }
+    items.forEach((it) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'side-item';
+      btn.innerHTML = '<div class="cmd"></div><span class="meta"></span>';
+      btn.querySelector('.cmd').textContent = it.command;
+      btn.querySelector('.meta').textContent = 'line ' + (it.row + 1);
+      btn.addEventListener('click', () => {
+        try {
+          term.scrollToLine(Math.max(0, it.row - 2));
+          term.select(0, it.row, Math.min(it.command.length + 20, 120));
+        } catch (_) {}
+        term.focus();
+      });
+      list.appendChild(btn);
+    });
+  }
+
+  /* ----- SSH profile picker ----- */
+  function openSshModal() {
+    hideMenus();
+    renderSshList();
+    document.getElementById('ssh-modal').classList.add('show');
+  }
+
+  function renderSshList() {
+    const list = document.getElementById('ssh-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!sshProfiles.length) {
+      list.innerHTML = '<p class="side-hint">No saved hosts yet.</p>';
+      return;
+    }
+    sshProfiles.forEach((p) => {
+      const row = document.createElement('div');
+      row.className = 'list-row';
+      row.innerHTML =
+        '<div class="grow"><div class="title"></div><div class="sub"></div></div>' +
+        '<div class="row-actions">' +
+        '<button type="button" data-go="">Connect</button>' +
+        '<button type="button" class="danger" data-del="">Delete</button>' +
+        '</div>';
+      row.querySelector('.title').textContent = p.label || p.user + '@' + p.host;
+      row.querySelector('.sub').textContent = p.user + '@' + p.host + (p.port && Number(p.port) !== 22 ? ':' + p.port : '');
+      row.querySelector('[data-go]').addEventListener('click', () => connectSsh(p));
+      row.querySelector('[data-del]').addEventListener('click', () => deleteSsh(p.id));
+      list.appendChild(row);
+    });
+  }
+
+  async function saveSshFromForm() {
+    const label = document.getElementById('ssh-label').value.trim();
+    const user = document.getElementById('ssh-user').value.trim();
+    const host = document.getElementById('ssh-host').value.trim();
+    const port = Number(document.getElementById('ssh-port').value) || 22;
+    if (!user || !host) {
+      snack('User and host are required');
+      return null;
+    }
+    const entry = {
+      id: uid(),
+      label: label || user + '@' + host,
+      user: user,
+      host: host,
+      port: port,
+    };
+    sshProfiles = sshProfiles.filter(
+      (p) => !(p.user === entry.user && p.host === entry.host && Number(p.port) === Number(entry.port))
+    );
+    sshProfiles.unshift(entry);
+    await persistStore('ssh-profiles', LS.ssh, sshProfiles);
+    renderSshList();
+    snack('Profile saved (local only)');
+    return entry;
+  }
+
+  async function deleteSsh(id) {
+    sshProfiles = sshProfiles.filter((p) => p.id !== id);
+    await persistStore('ssh-profiles', LS.ssh, sshProfiles);
+    renderSshList();
+  }
+
+  function connectSsh(profile) {
+    if (!profile) return;
+    let cmd = 'ssh ';
+    if (profile.port && Number(profile.port) !== 22) {
+      cmd += '-p ' + Number(profile.port) + ' ';
+    }
+    cmd += profile.user + '@' + profile.host;
+    hideModal('ssh-modal');
+    hideMenus();
+    sendInput(cmd + '\r');
+    snack('Connecting: ' + cmd);
+    term.focus();
+  }
+
+  /* ----- Export PDF / docx ----- */
+  function exportPdf() {
+    hideMenus();
+    const text = getTranscript();
+    const w = window.open('', '_blank');
+    if (!w) {
+      snack('Pop-up blocked — allow pop-ups to export PDF');
+      return;
+    }
+    const title = docTitle();
+    w.document.write(
+      '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' +
+        title.replace(/</g, '') +
+        '</title><style>body{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11pt;white-space:pre-wrap;margin:24px;color:#202124}h1{font-family:Arial,sans-serif;font-size:16pt;font-weight:400}</style></head><body><h1>' +
+        title.replace(/</g, '&lt;') +
+        ' — transcript</h1><pre id="t"></pre><script>document.getElementById("t").textContent = ' +
+        JSON.stringify(text) +
+        ';setTimeout(function(){window.print()},200)<\\/script></body></html>'
+    );
+    w.document.close();
+    snack('Print dialog → Save as PDF');
+  }
+
+  function crc32(buf) {
+    let c = ~0;
+    for (let i = 0; i < buf.length; i++) {
+      c ^= buf[i];
+      for (let k = 0; k < 8; k++) c = c & 1 ? (0xedb88320 ^ (c >>> 1)) : c >>> 1;
+    }
+    return ~c >>> 0;
+  }
+
+  function u16(n) {
+    const b = new Uint8Array(2);
+    b[0] = n & 255;
+    b[1] = (n >>> 8) & 255;
+    return b;
+  }
+  function u32(n) {
+    const b = new Uint8Array(4);
+    b[0] = n & 255;
+    b[1] = (n >>> 8) & 255;
+    b[2] = (n >>> 16) & 255;
+    b[3] = (n >>> 24) & 255;
+    return b;
+  }
+
+  function concatBytes(chunks) {
+    let len = 0;
+    chunks.forEach((c) => (len += c.length));
+    const out = new Uint8Array(len);
+    let o = 0;
+    chunks.forEach((c) => {
+      out.set(c, o);
+      o += c.length;
+    });
+    return out;
+  }
+
+  function zipStore(files) {
+    const enc = new TextEncoder();
+    const localParts = [];
+    const centralParts = [];
+    let offset = 0;
+    files.forEach((f) => {
+      const name = enc.encode(f.name);
+      const data = typeof f.data === 'string' ? enc.encode(f.data) : f.data;
+      const crc = crc32(data);
+      const local = concatBytes([
+        u32(0x04034b50),
+        u16(20),
+        u16(0),
+        u16(0),
+        u16(0),
+        u16(0),
+        u32(crc),
+        u32(data.length),
+        u32(data.length),
+        u16(name.length),
+        u16(0),
+        name,
+        data,
+      ]);
+      localParts.push(local);
+      const central = concatBytes([
+        u32(0x02014b50),
+        u16(20),
+        u16(20),
+        u16(0),
+        u16(0),
+        u16(0),
+        u16(0),
+        u32(crc),
+        u32(data.length),
+        u32(data.length),
+        u16(name.length),
+        u16(0),
+        u16(0),
+        u16(0),
+        u16(0),
+        u32(0),
+        u32(offset),
+        name,
+      ]);
+      centralParts.push(central);
+      offset += local.length;
+    });
+    const central = concatBytes(centralParts);
+    const end = concatBytes([
+      u32(0x06054b50),
+      u16(0),
+      u16(0),
+      u16(files.length),
+      u16(files.length),
+      u32(central.length),
+      u32(offset),
+      u16(0),
+    ]);
+    return concatBytes(localParts.concat([central, end]));
+  }
+
+  function xmlEscape(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function exportDocx() {
+    hideMenus();
+    const text = getTranscript();
+    const paras = text.split(/\n/).map((line) => {
+      if (!line) return '<w:p><w:pPr><w:rPr><w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/><w:sz w:val="20"/></w:rPr></w:pPr></w:p>';
+      return (
+        '<w:p><w:r><w:rPr><w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/><w:sz w:val="20"/></w:rPr><w:t xml:space="preserve">' +
+        xmlEscape(line) +
+        '</w:t></w:r></w:p>'
+      );
+    });
+    const documentXml =
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      '<w:body>' +
+      '<w:p><w:r><w:rPr><w:b/><w:sz w:val="28"/></w:rPr><w:t>' +
+      xmlEscape(docTitle() + ' — transcript') +
+      '</w:t></w:r></w:p>' +
+      paras.join('') +
+      '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720"/></w:sectPr>' +
+      '</w:body></w:document>';
+    const contentTypes =
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '</Types>';
+    const rels =
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+      '</Relationships>';
+    const zip = zipStore([
+      { name: '[Content_Types].xml', data: contentTypes },
+      { name: '_rels/.rels', data: rels },
+      { name: 'word/document.xml', data: documentXml },
+    ]);
+    downloadBlob(new Blob([zip], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), safeFilename(docTitle()) + '-transcript.docx');
+    snack('Exported .docx');
+  }
+
+  function hideModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('show');
   }
 
   /* ----- menus ----- */
@@ -673,8 +1493,8 @@
     if (!sub) return;
     openSub = name;
     layer.classList.add('show');
+    if (name === 'bookmarks') renderBookmarksUI();
     const r = fromBtn.getBoundingClientRect();
-    // Prefer to the right; if toolbar button, open below
     if (fromBtn.closest('.toolbar')) {
       place(sub, r.left, r.bottom + 2);
     } else {
@@ -755,7 +1575,6 @@
       }
       case 'toggle-no-bg':
         setNoCellBg(!state.noCellBg);
-        // keep submenu open so user can see check
         syncThemeChecks();
         return;
       case 'reset-format':
@@ -785,6 +1604,42 @@
       case 'download':
         hideMenus();
         downloadTranscript();
+        return;
+      case 'export-pdf':
+        exportPdf();
+        return;
+      case 'export-docx':
+        exportDocx();
+        return;
+      case 'open-connection':
+        openSshModal();
+        return;
+      case 'manage-sessions':
+        openSessionsModal();
+        return;
+      case 'save-session':
+        hideMenus();
+        saveCurrentSession(true);
+        return;
+      case 'rename-session':
+        hideMenus();
+        renameSession();
+        return;
+      case 'toggle-outline':
+        setOutlineOpen(!state.outlineOpen);
+        break;
+      case 'toggle-comments':
+        setCommentsOpen(!state.commentsOpen);
+        break;
+      case 'add-comment':
+        openCommentModal();
+        return;
+      case 'bookmark-command':
+        hideMenus();
+        addBookmark(lastCommand);
+        return;
+      case 'manage-bookmarks':
+        openBookmarksModal();
         return;
       case 'close':
         hideMenus();
@@ -889,7 +1744,7 @@
     const el = e.target.closest(
       '[data-action], [data-size], [data-theme], [data-term], [data-submenu], [data-c], [data-zoom]'
     );
-    if (el && (el.closest('.dropdown, .submenu, .toolbar, .header-right') || el.hasAttribute('data-c'))) {
+    if (el && (el.closest('.dropdown, .submenu, .toolbar, .header-right, .side-panel') || el.hasAttribute('data-c'))) {
       handleAction(el);
     }
   });
@@ -919,6 +1774,7 @@
 
   document.getElementById('star-btn').addEventListener('click', (e) => {
     e.currentTarget.classList.toggle('starred');
+    if (e.currentTarget.classList.contains('starred')) addBookmark(lastCommand);
   });
 
   const shareModal = document.getElementById('share-modal');
@@ -939,6 +1795,8 @@
   document.getElementById('find-close').addEventListener('click', closeFind);
   document.getElementById('find-next').addEventListener('click', () => runFind('next'));
   document.getElementById('find-prev').addEventListener('click', () => runFind('prev'));
+  document.getElementById('replace-one').addEventListener('click', () => replaceInTranscript(false));
+  document.getElementById('replace-all').addEventListener('click', () => replaceInTranscript(true));
   document.getElementById('find-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -951,38 +1809,98 @@
     if (e.target.id === 'find-modal') closeFind();
   });
 
-  document.getElementById('about-done').addEventListener('click', () =>
-    document.getElementById('about-modal').classList.remove('show')
-  );
+  document.getElementById('about-done').addEventListener('click', () => hideModal('about-modal'));
   document.getElementById('about-modal').addEventListener('click', (e) => {
-    if (e.target.id === 'about-modal') document.getElementById('about-modal').classList.remove('show');
+    if (e.target.id === 'about-modal') hideModal('about-modal');
   });
-  document.getElementById('shortcuts-done').addEventListener('click', () =>
-    document.getElementById('shortcuts-modal').classList.remove('show')
-  );
+  document.getElementById('shortcuts-done').addEventListener('click', () => hideModal('shortcuts-modal'));
   document.getElementById('shortcuts-modal').addEventListener('click', (e) => {
-    if (e.target.id === 'shortcuts-modal') document.getElementById('shortcuts-modal').classList.remove('show');
+    if (e.target.id === 'shortcuts-modal') hideModal('shortcuts-modal');
   });
+
+  document.getElementById('paste-cancel').addEventListener('click', () => {
+    pendingPaste = null;
+    hideModal('paste-modal');
+  });
+  document.getElementById('paste-confirm').addEventListener('click', () => {
+    const t = pendingPaste;
+    pendingPaste = null;
+    hideModal('paste-modal');
+    if (t) doPaste(t);
+  });
+  document.getElementById('paste-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'paste-modal') {
+      pendingPaste = null;
+      hideModal('paste-modal');
+    }
+  });
+
+  document.getElementById('sessions-done').addEventListener('click', () => hideModal('sessions-modal'));
+  document.getElementById('sessions-save').addEventListener('click', () => saveCurrentSession(true));
+  document.getElementById('sessions-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'sessions-modal') hideModal('sessions-modal');
+  });
+
+  document.getElementById('ssh-done').addEventListener('click', () => hideModal('ssh-modal'));
+  document.getElementById('ssh-save').addEventListener('click', () => saveSshFromForm());
+  document.getElementById('ssh-connect').addEventListener('click', async () => {
+    const p = await saveSshFromForm();
+    if (p) connectSsh(p);
+  });
+  document.getElementById('ssh-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'ssh-modal') hideModal('ssh-modal');
+  });
+
+  document.getElementById('bookmarks-done').addEventListener('click', () => hideModal('bookmarks-modal'));
+  document.getElementById('bookmark-add').addEventListener('click', () => {
+    addBookmark(document.getElementById('bookmark-cmd').value);
+    document.getElementById('bookmark-cmd').value = '';
+  });
+  document.getElementById('bookmarks-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'bookmarks-modal') hideModal('bookmarks-modal');
+  });
+
+  document.getElementById('comment-cancel').addEventListener('click', () => hideModal('comment-modal'));
+  document.getElementById('comment-save').addEventListener('click', () => saveComment());
+  document.getElementById('comment-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'comment-modal') hideModal('comment-modal');
+  });
+
+  function closeAllModals() {
+    hideMenus();
+    [
+      'share-modal',
+      'find-modal',
+      'about-modal',
+      'shortcuts-modal',
+      'paste-modal',
+      'sessions-modal',
+      'ssh-modal',
+      'bookmarks-modal',
+      'comment-modal',
+    ].forEach(hideModal);
+    pendingPaste = null;
+    closeFind();
+  }
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      hideMenus();
-      shareModal.classList.remove('show');
-      closeFind();
-      document.getElementById('about-modal').classList.remove('show');
-      document.getElementById('shortcuts-modal').classList.remove('show');
+      closeAllModals();
       return;
     }
     const meta = e.ctrlKey || e.metaKey;
     const inTitle = e.target === title;
-    const inFind = e.target && e.target.id === 'find-input';
+    const inField =
+      e.target &&
+      (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') &&
+      e.target !== term.textarea;
     if (meta && e.shiftKey && (e.key === '.' || e.key === '>')) {
       e.preventDefault();
       applyFontSize(state.fontSize + 1);
     } else if (meta && e.shiftKey && (e.key === ',' || e.key === '<')) {
       e.preventDefault();
       applyFontSize(state.fontSize - 1);
-    } else if (meta && (e.key === 'b' || e.key === 'B') && !inTitle && !inFind) {
+    } else if (meta && (e.key === 'b' || e.key === 'B') && !inTitle && !inField) {
       e.preventDefault();
       state.bold = !state.bold;
       term.options.fontWeight = state.bold ? 'bold' : 'normal';
@@ -991,12 +1909,21 @@
     } else if (meta && (e.key === 'f' || e.key === 'F') && !inTitle) {
       e.preventDefault();
       openFind();
-    } else if (meta && (e.key === 'p' || e.key === 'P') && !inTitle) {
+    } else if (meta && (e.key === 'p' || e.key === 'P') && !inTitle && !inField) {
       e.preventDefault();
       window.print();
-    } else if (meta && (e.key === 'n' || e.key === 'N') && !inTitle) {
+    } else if (meta && (e.key === 'n' || e.key === 'N') && !inTitle && !inField) {
       e.preventDefault();
       window.open(location.href, '_blank');
+    } else if (meta && (e.key === 's' || e.key === 'S') && !inField) {
+      e.preventDefault();
+      saveCurrentSession(true);
+    } else if (meta && e.altKey && (e.key === 'm' || e.key === 'M')) {
+      e.preventDefault();
+      openCommentModal();
+    } else if (meta && e.altKey && (e.key === 'o' || e.key === 'O')) {
+      e.preventDefault();
+      setOutlineOpen(!state.outlineOpen);
     } else if (meta && (e.key === '/' || e.key === '?')) {
       e.preventDefault();
       showShortcuts();
@@ -1026,7 +1953,23 @@
     if (sw) sw.style.background = (THEMES[state.themeName] || THEMES.docs).foreground;
   }
   applyZoom(state.zoom);
+  setOutlineOpen(state.outlineOpen);
+  setCommentsOpen(state.commentsOpen);
   syncThemeChecks();
+
+  (async function bootStores() {
+    sessions = (await loadStore('sessions', LS.sessions, [])) || [];
+    bookmarks = (await loadStore('bookmarks', LS.bookmarks, [])) || [];
+    comments = (await loadStore('comments', LS.comments, [])) || [];
+    sshProfiles = (await loadStore('ssh-profiles', LS.ssh, [])) || [];
+    if (!Array.isArray(sessions)) sessions = [];
+    if (!Array.isArray(bookmarks)) bookmarks = [];
+    if (!Array.isArray(comments)) comments = [];
+    if (!Array.isArray(sshProfiles)) sshProfiles = [];
+    renderBookmarksUI();
+    renderComments();
+    renderOutline();
+  })();
 
   setTimeout(() => {
     sendResize();

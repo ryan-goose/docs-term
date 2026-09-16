@@ -69,38 +69,69 @@ Use the toolbar **Highlight** button (or **Format → Highlight color** / **View
 | **Solarized light / dark** | Solarized themes |
 | **No cell backgrounds** | Toggle: rewrite SGR bg → `49` (default) **before** `term.write`; keeps fg colors; page stays white |
 
-Prefs (theme, no-bg, font size/family, zoom, ruler/chrome) persist in `localStorage` (`docs-term-prefs`).
+Prefs (theme, no-bg, font size/family, zoom, ruler/chrome, panel open state) persist in `localStorage` (`docs-term-prefs`). Named sessions, bookmarks, comments, and SSH profiles also sync to `~/.config/docs-term/*.json` via `/api/config/:name`.
+
+## Features
+
+| # | Feature | Where |
+| --- | --- | --- |
+| 2 | **Named sessions** | File → Named sessions… / Save session (`Ctrl/Cmd+S`); stores name, optional cwd, scrollback |
+| 3 | **Comment side panel** | Insert → Comment / comment toolbar / header; View → Show comments |
+| 4 | **Find & replace** | Edit → Find and replace (`Ctrl/Cmd+F`); find jumps in live buffer; replace downloads a transcript copy (cannot rewrite PTY history) |
+| 5 | **Command bookmarks** | Star / Insert → Bookmarks / Tools → Command bookmarks…; Insert pastes into PTY |
+| 6 | **Outline** | View → Show outline; auto list of recent commands; click to scroll |
+| 8 | **SSH profile picker** | File → Open connection…; writes `ssh user@host` into the PTY; profiles local only (no secrets in git) |
+| 10 | **Export PDF / .docx** | File → Export as PDF… / Export as .docx… (client-side) |
+| 11 | **Smart paste** | Multiline paste asks for confirm; uses **bracketed paste** |
+| 17 | **Keyboard cheat-sheet** | Help → Keyboard shortcuts (`Ctrl/Cmd+/`) |
+| 20 | **Artix .desktop launcher** | `packaging/docs-term.desktop` → install with `scripts/install-desktop.sh` |
 
 ## Menus (working actions)
 
 | Menu | Wired actions |
 | --- | --- |
-| **File** | New (tab), New terminal session (reload), Share, Download transcript, Print, Close |
-| **Edit** | Undo/Redo (term keys), Cut/Copy/Paste, Select all, Find in scrollback |
-| **View** | Show ruler, show/hide chrome, Full screen, Zoom, font size, Terminal appearance |
-| **Insert** | New line, Clear screen, Form feed |
-| **Format** | Text / Size / Text color / Highlight submenu, Clear formatting |
-| **Tools / Help** | About, Keyboard shortcuts, Terminal appearance |
-
-Toolbar size/color/bold and **Ctrl/Cmd+Shift+.** / **,** still change the PTY font metrics (fit + resize).
+| **File** | New tab, New session, Open connection (SSH), Named sessions, Save session, Share, Download .txt, Export PDF/.docx, Rename, Print, Close |
+| **Edit** | Undo/Redo, Cut/Copy/Paste (smart), Select all, Find and replace, Bookmark last command |
+| **View** | Ruler, chrome, Full screen, Zoom, font size, Outline, Comments, Terminal appearance |
+| **Insert** | New line, Clear screen, Form feed, Comment, Bookmarks |
+| **Format** | Text / Size / Text color / Highlight, Clear formatting |
+| **Tools / Help** | About, Shortcuts, Terminal appearance, Bookmarks, SSH profiles |
 
 Unavailable Docs chrome items remain disabled or show a snackbar.
 
+## Artix / desktop launcher
+
+```bash
+# Install user .desktop (opens browser; start script brings server up if needed)
+./scripts/install-desktop.sh
+# → ~/.local/share/applications/docs-term.desktop
+```
+
+Source files:
+
+- `packaging/docs-term.desktop` — launcher template (`xdg-open http://127.0.0.1:3737`)
+- `scripts/start-docs-term.sh` — start server if `/health` is down, then open browser
+- `scripts/install-desktop.sh` — copy into `~/.local/share/applications` and point Exec at the start script
+
 ## Stack
 
-- `express` static UI on port **3737**
+- `express` static UI on port **3737** + JSON config API under `~/.config/docs-term`
 - `ws` WebSocket at `/pty`
 - `node-pty` per-connection shell
 - `@xterm/xterm` + `@xterm/addon-fit` in the page body
 
-Works in **Chrome and Firefox** (standard WebSocket, canvas, `ResizeObserver`).
+Works in **Chrome and Firefox** (standard WebSocket, canvas, `ResizeObserver`, bracketed paste).
 
 ## Layout
 
 ```
-server.js              HTTP + WebSocket PTY
-public/index.html      Docs chrome
+server.js                 HTTP + WebSocket PTY + /api/config
+public/index.html         Docs chrome + panels/modals
 public/styles.css
-public/app.js          xterm + menus + SGR bg filter
-public/vendor/         copied from node_modules on npm install
+public/app.js             xterm + menus + features + SGR bg filter
+public/vendor/            copied from node_modules on npm install
+packaging/docs-term.desktop
+scripts/start-docs-term.sh
+scripts/install-desktop.sh
+scripts/copy-vendor.js
 ```

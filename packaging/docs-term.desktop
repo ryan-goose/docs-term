@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=docs-term
+GenericName=Terminal (Docs chrome)
+Comment=Local Docs-lookalike terminal at http://127.0.0.1:3737
+Exec=xdg-open http://127.0.0.1:3737
+Icon=utilities-terminal
+Terminal=false
+Categories=System;TerminalEmulator;Utility;
+StartupNotify=true
+Keywords=terminal;docs;pty;shell;

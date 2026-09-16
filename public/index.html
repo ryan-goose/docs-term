@@ -74,7 +74,7 @@
         </div>
       </div>
       <div class="header-right">
-        <button class="round-icon" type="button" title="Open comment history" data-nyi="Comments"><svg><use href="#i-comment"/></svg></button>
+        <button class="round-icon" type="button" title="Open comment history" data-action="toggle-comments" id="comments-toggle"><svg><use href="#i-comment"/></svg></button>
         <button class="round-icon" type="button" title="Join a call here" data-nyi="Meet"><svg><use href="#i-video"/></svg></button>
         <button class="share-btn" id="share-btn" type="button"><svg><use href="#i-lock"/></svg>Share</button>
         <div class="avatar" title="Ryan">R</div>
@@ -126,7 +126,7 @@
         </button>
         <span class="tb-sep"></span>
         <button class="tb" type="button" title="Insert link" data-nyi="Insert link"><svg><use href="#i-link"/></svg></button>
-        <button class="tb" type="button" title="Add comment" data-nyi="Add comment"><svg><use href="#i-comment"/></svg></button>
+        <button class="tb" type="button" title="Add comment" data-action="add-comment" id="add-comment-btn"><svg><use href="#i-comment"/></svg></button>
         <button class="tb" type="button" title="Insert image" data-nyi="Insert image"><svg><use href="#i-image"/></svg></button>
         <span class="tb-sep"></span>
         <button class="tb" type="button" title="Align" data-nyi="Align"><svg><use href="#i-align"/></svg></button>
@@ -152,13 +152,31 @@
     <div class="ruler-inner"><div class="ruler-ticks"></div></div>
   </div>
 
-  <main class="canvas" id="canvas">
-    <div class="page" id="page">
-      <div class="page-body">
-        <div id="terminal"></div>
+  <div class="workspace" id="workspace">
+    <aside class="side-panel outline-panel" id="outline-panel" hidden>
+      <div class="side-panel-head">
+        <h3>Outline</h3>
+        <button type="button" class="side-close" data-action="toggle-outline" title="Close">×</button>
       </div>
-    </div>
-  </main>
+      <p class="side-hint">Last commands from scrollback</p>
+      <div class="side-list" id="outline-list"></div>
+    </aside>
+    <main class="canvas" id="canvas">
+      <div class="page" id="page">
+        <div class="page-body">
+          <div id="terminal"></div>
+        </div>
+      </div>
+    </main>
+    <aside class="side-panel comments-panel" id="comments-panel" hidden>
+      <div class="side-panel-head">
+        <h3>Comments</h3>
+        <button type="button" class="side-close" data-action="toggle-comments" title="Close">×</button>
+      </div>
+      <button type="button" class="btn-text side-add" data-action="add-comment">+ Add comment</button>
+      <div class="side-list" id="comments-list"></div>
+    </aside>
+  </div>
 </div>
 
 <div class="menu-layer" id="menu-layer"></div>
@@ -166,16 +184,16 @@
 <div class="dropdown" id="menu-file">
   <button class="mi" type="button" data-action="new-tab"><span class="label">New</span><span class="kbd">Ctrl+N</span></button>
   <button class="mi" type="button" data-action="new-session"><span class="label">New terminal session</span></button>
-  <button class="mi disabled" type="button"><span class="label">Open</span><span class="kbd">Ctrl+O</span></button>
-  <button class="mi disabled" type="button"><span class="label">Make a copy</span></button>
+  <button class="mi" type="button" data-action="open-connection"><span class="label">Open connection…</span><span class="kbd">SSH</span></button>
+  <button class="mi" type="button" data-action="manage-sessions"><span class="label">Named sessions…</span></button>
+  <button class="mi" type="button" data-action="save-session"><span class="label">Save session</span></button>
   <div class="sep"></div>
   <button class="mi" type="button" data-action="share"><span class="label">Share</span></button>
-  <button class="mi disabled" type="button"><span class="label">Email</span></button>
-  <button class="mi" type="button" data-action="download"><span class="label">Download</span><span class="kbd">transcript</span></button>
+  <button class="mi" type="button" data-action="download"><span class="label">Download transcript</span><span class="kbd">.txt</span></button>
+  <button class="mi" type="button" data-action="export-pdf"><span class="label">Export as PDF…</span></button>
+  <button class="mi" type="button" data-action="export-docx"><span class="label">Export as .docx…</span></button>
   <div class="sep"></div>
-  <button class="mi disabled" type="button"><span class="label">Version history</span></button>
-  <button class="mi disabled" type="button"><span class="label">Rename</span></button>
-  <button class="mi disabled" type="button"><span class="label">Move</span></button>
+  <button class="mi" type="button" data-action="rename-session"><span class="label">Rename</span></button>
   <div class="sep"></div>
   <button class="mi" type="button" data-action="print"><span class="label">Print</span><span class="kbd">Ctrl+P</span></button>
   <div class="sep"></div>
@@ -191,7 +209,9 @@
   <button class="mi" type="button" data-action="paste"><span class="label">Paste</span><span class="kbd">Ctrl+V</span></button>
   <button class="mi" type="button" data-action="select-all"><span class="label">Select all</span><span class="kbd">Ctrl+A</span></button>
   <div class="sep"></div>
-  <button class="mi" type="button" data-action="find"><span class="label">Find</span><span class="kbd">Ctrl+F</span></button>
+  <button class="mi" type="button" data-action="find"><span class="label">Find and replace</span><span class="kbd">Ctrl+F</span></button>
+  <div class="sep"></div>
+  <button class="mi" type="button" data-action="bookmark-command"><span class="label">Bookmark last command</span></button>
 </div>
 
 <div class="dropdown" id="menu-view">
@@ -202,6 +222,9 @@
   <button class="mi" type="button" data-submenu="zoom"><span class="label">Zoom</span><span class="arrow">▶</span></button>
   <button class="mi" type="button" data-action="font-inc"><span class="label">Increase font size</span><span class="kbd">Ctrl+Shift+.</span></button>
   <button class="mi" type="button" data-action="font-dec"><span class="label">Decrease font size</span><span class="kbd">Ctrl+Shift+,</span></button>
+  <div class="sep"></div>
+  <button class="mi" type="button" data-action="toggle-outline"><span class="label">Show outline</span></button>
+  <button class="mi" type="button" data-action="toggle-comments"><span class="label">Show comments</span></button>
   <div class="sep"></div>
   <button class="mi" type="button" data-submenu="highlight"><span class="label">Terminal appearance</span><span class="arrow">▶</span></button>
 </div>
@@ -217,8 +240,10 @@
   <button class="mi disabled" type="button"><span class="label">Horizontal line</span></button>
   <button class="mi disabled" type="button"><span class="label">Special characters</span></button>
   <div class="sep"></div>
+  <button class="mi" type="button" data-action="add-comment"><span class="label">Comment</span><span class="kbd">Ctrl+Alt+M</span></button>
+  <button class="mi" type="button" data-submenu="bookmarks"><span class="label">Bookmarks</span><span class="arrow">▶</span></button>
+  <button class="mi" type="button" data-action="bookmark-command"><span class="label">Bookmark last command</span></button>
   <button class="mi disabled" type="button"><span class="label">Link</span><span class="kbd">Ctrl+K</span></button>
-  <button class="mi disabled" type="button"><span class="label">Comment</span><span class="kbd">Ctrl+Alt+M</span></button>
 </div>
 
 <div class="dropdown" id="menu-format">
@@ -241,8 +266,8 @@
   <button class="mi" type="button" data-action="shortcuts"><span class="label">Keyboard shortcuts</span><span class="kbd">Ctrl+/</span></button>
   <div class="sep"></div>
   <button class="mi" type="button" data-submenu="highlight"><span class="label">Terminal appearance</span><span class="arrow">▶</span></button>
-  <button class="mi disabled" type="button"><span class="label">Spelling and grammar</span></button>
-  <button class="mi disabled" type="button"><span class="label">Word count</span></button>
+  <button class="mi" type="button" data-action="manage-bookmarks"><span class="label">Command bookmarks…</span></button>
+  <button class="mi" type="button" data-action="open-connection"><span class="label">SSH profiles…</span></button>
   <div class="sep"></div>
   <button class="mi disabled" type="button"><span class="label">Preferences</span></button>
   <button class="mi disabled" type="button"><span class="label">Accessibility</span></button>
@@ -260,7 +285,13 @@
   <div class="sep"></div>
   <button class="mi" type="button" data-action="shortcuts"><span class="label">Keyboard shortcuts</span><span class="kbd">Ctrl+/</span></button>
 </div>
-<button class="mi" type="button" data-action="shortcuts"><span class="label">Keyboard shortcuts</span><span class="kbd">Ctrl+/</span></button>
+
+<div class="submenu" id="sub-bookmarks">
+  <div class="swatch-row" id="bookmarks-empty">No bookmarks yet</div>
+  <div id="bookmarks-menu-items"></div>
+  <div class="sep"></div>
+  <button class="mi" type="button" data-action="manage-bookmarks"><span class="label">Manage bookmarks…</span></button>
+  <button class="mi" type="button" data-action="bookmark-command"><span class="label">Bookmark last command</span></button>
 </div>
 
 <div class="submenu" id="sub-text">
@@ -331,12 +362,18 @@
 
 <div class="modal-back" id="find-modal">
   <div class="dialog find-dialog" role="dialog" aria-labelledby="find-title">
-    <h2 id="find-title">Find</h2>
-    <input class="share-field" id="find-input" type="search" placeholder="Find in scrollback" autocomplete="off">
+    <h2 id="find-title">Find and replace</h2>
+    <label class="field-label" for="find-input">Find in scrollback</label>
+    <input class="share-field" id="find-input" type="search" placeholder="Find" autocomplete="off">
+    <label class="field-label" for="replace-input">Replace with</label>
+    <input class="share-field" id="replace-input" type="text" placeholder="Replace" autocomplete="off">
+    <p class="find-note">Find jumps in the live buffer. Replace edits a <strong>transcript copy</strong> only (PTY history cannot be rewritten) — download the replaced text.</p>
     <p class="find-status" id="find-status"></p>
-    <div class="dialog-actions">
+    <div class="dialog-actions wrap-actions">
       <button class="btn-text" type="button" id="find-prev">Previous</button>
       <button class="btn-text" type="button" id="find-next">Next</button>
+      <button class="btn-text" type="button" id="replace-one">Replace</button>
+      <button class="btn-text" type="button" id="replace-all">Replace all &amp; download</button>
       <button class="btn-filled" type="button" id="find-close">Done</button>
     </div>
   </div>
@@ -361,14 +398,94 @@
       <li><kbd>Ctrl/Cmd + Shift + .</kbd> Increase font size</li>
       <li><kbd>Ctrl/Cmd + Shift + ,</kbd> Decrease font size</li>
       <li><kbd>Ctrl/Cmd + B</kbd> Bold</li>
-      <li><kbd>Ctrl/Cmd + F</kbd> Find in scrollback</li>
+      <li><kbd>Ctrl/Cmd + F</kbd> Find and replace</li>
       <li><kbd>Ctrl/Cmd + P</kbd> Print</li>
       <li><kbd>Ctrl/Cmd + N</kbd> New terminal tab</li>
+      <li><kbd>Ctrl/Cmd + S</kbd> Save named session</li>
+      <li><kbd>Ctrl/Cmd + Alt + M</kbd> Add comment</li>
+      <li><kbd>Ctrl/Cmd + Alt + O</kbd> Toggle outline</li>
       <li><kbd>Ctrl/Cmd + /</kbd> This shortcuts list</li>
       <li><kbd>Esc</kbd> Close menus / dialogs</li>
     </ul>
     <div class="dialog-actions">
       <button class="btn-filled" type="button" id="shortcuts-done">Done</button>
+    </div>
+  </div>
+</div>
+
+
+<div class="modal-back" id="paste-modal">
+  <div class="dialog" role="dialog" aria-labelledby="paste-title">
+    <h2 id="paste-title">Confirm multiline paste</h2>
+    <p>You are about to paste <span id="paste-lines">0</span> lines into the terminal. This can run multiple commands.</p>
+    <pre class="paste-preview" id="paste-preview"></pre>
+    <p class="find-note">Paste uses <strong>bracketed paste</strong> when the shell supports it.</p>
+    <div class="dialog-actions">
+      <button class="btn-text" type="button" id="paste-cancel">Cancel</button>
+      <button class="btn-filled" type="button" id="paste-confirm">Paste</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-back" id="sessions-modal">
+  <div class="dialog wide-dialog" role="dialog" aria-labelledby="sessions-title">
+    <h2 id="sessions-title">Named sessions</h2>
+    <p class="find-note">Sessions store name, optional cwd, and scrollback text locally (<code>localStorage</code> + <code>~/.config/docs-term</code>).</p>
+    <div class="side-list modal-list" id="sessions-list"></div>
+    <div class="dialog-actions">
+      <button class="btn-text" type="button" id="sessions-save">Save current</button>
+      <button class="btn-filled" type="button" id="sessions-done">Done</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-back" id="ssh-modal">
+  <div class="dialog wide-dialog" role="dialog" aria-labelledby="ssh-title">
+    <h2 id="ssh-title">Open connection</h2>
+    <p class="find-note">Profiles are stored locally only (no passwords or keys in git). Connecting writes <code>ssh …</code> into the PTY.</p>
+    <div class="form-grid">
+      <label>Label<input class="share-field" id="ssh-label" placeholder="prod box"></label>
+      <label>User<input class="share-field" id="ssh-user" placeholder="ryan"></label>
+      <label>Host<input class="share-field" id="ssh-host" placeholder="example.com"></label>
+      <label>Port<input class="share-field" id="ssh-port" type="number" value="22" min="1" max="65535"></label>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn-text" type="button" id="ssh-save">Save profile</button>
+      <button class="btn-filled" type="button" id="ssh-connect">Connect</button>
+    </div>
+    <div class="sep"></div>
+    <div class="side-list modal-list" id="ssh-list"></div>
+    <div class="dialog-actions">
+      <button class="btn-filled" type="button" id="ssh-done">Done</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-back" id="bookmarks-modal">
+  <div class="dialog wide-dialog" role="dialog" aria-labelledby="bookmarks-title">
+    <h2 id="bookmarks-title">Command bookmarks</h2>
+    <div class="form-grid">
+      <label class="span-2">Command<input class="share-field" id="bookmark-cmd" placeholder="ls -la"></label>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn-text" type="button" id="bookmark-add">Add</button>
+      <button class="btn-filled" type="button" id="bookmarks-done">Done</button>
+    </div>
+    <div class="side-list modal-list" id="bookmarks-list"></div>
+  </div>
+</div>
+
+<div class="modal-back" id="comment-modal">
+  <div class="dialog" role="dialog" aria-labelledby="comment-title">
+    <h2 id="comment-title">Add comment</h2>
+    <p class="find-note">Sticky note tied to a scrollback line (local only).</p>
+    <label class="field-label" for="comment-anchor">Anchor line / snippet</label>
+    <input class="share-field" id="comment-anchor" autocomplete="off">
+    <label class="field-label" for="comment-body">Comment</label>
+    <textarea class="share-field tall-field" id="comment-body" rows="4" placeholder="Note…"></textarea>
+    <div class="dialog-actions">
+      <button class="btn-text" type="button" id="comment-cancel">Cancel</button>
+      <button class="btn-filled" type="button" id="comment-save">Comment</button>
     </div>
   </div>
 </div>

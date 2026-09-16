@@ -23,11 +23,81 @@ const SHELL =
       ? '/bin/bash'
       : '/bin/sh';
 
+const CONFIG_DIR = path.join(os.homedir(), '.config', 'docs-term');
+const ALLOWED_CONFIG = new Set([
+  'sessions',
+  'bookmarks',
+  'comments',
+  'ssh-profiles',
+  'prefs',
+]);
+
+function ensureConfigDir() {
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+}
+
+function configPath(name) {
+  if (!ALLOWED_CONFIG.has(name)) return null;
+  return path.join(CONFIG_DIR, name + '.json');
+}
+
 const app = express();
 app.disable('x-powered-by');
+app.use(express.json({ limit: '8mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, shell: SHELL, sessions });
+  res.json({ ok: true, shell: SHELL, sessions, configDir: CONFIG_DIR });
+});
+
+app.get('/api/config/:name', (req, res) => {
+  const file = configPath(req.params.name);
+  if (!file) {
+    res.status(400).json({ error: 'Unknown config name' });
+    return;
+  }
+  try {
+    if (!fs.existsSync(file)) {
+      res.json({ name: req.params.name, data: null });
+      return;
+    }
+    const raw = fs.readFileSync(file, 'utf8');
+    res.json({ name: req.params.name, data: JSON.parse(raw) });
+  } catch (err) {
+    res.status(500).json({ error: String(err && err.message ? err.message : err) });
+  }
+});
+
+app.put('/api/config/:name', (req, res) => {
+  const file = configPath(req.params.name);
+  if (!file) {
+    res.status(400).json({ error: 'Unknown config name' });
+    return;
+  }
+  try {
+    ensureConfigDir();
+    const data = req.body && Object.prototype.hasOwnProperty.call(req.body, 'data')
+      ? req.body.data
+      : req.body;
+    fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
+    res.json({ ok: true, name: req.params.name });
+  } catch (err) {
+    res.status(500).json({ error: String(err && err.message ? err.message : err) });
+  }
+});
+
+app.delete('/api/config/:name', (req, res) => {
+  const file = configPath(req.params.name);
+  if (!file) {
+    res.status(400).json({ error: 'Unknown config name' });
+    return;
+  }
+  try {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err && err.message ? err.message : err) });
+  }
 });
 
 const server = http.createServer(app);
@@ -127,5 +197,6 @@ wss.on('connection', (ws) => {
 server.listen(PORT, HOST, () => {
   console.log(`docs-term running at http://${HOST}:${PORT}`);
   console.log(`Shell: ${SHELL}`);
+  console.log(`Config: ${CONFIG_DIR}`);
   console.log('Bind: localhost only. This is a real login shell — do not expose it.');
 });
