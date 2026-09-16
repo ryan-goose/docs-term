@@ -121,7 +121,7 @@
           <svg><use href="#i-color"/></svg>
           <span class="swatch" id="color-swatch"></span>
         </button>
-        <button class="tb" type="button" title="Highlight color" data-action="theme-toggle" id="hl-btn">
+        <button class="tb" type="button" title="Highlight color" data-action="highlight-menu" data-submenu="highlight" id="hl-btn">
           <svg><use href="#i-highlight"/></svg>
         </button>
         <span class="tb-sep"></span>
@@ -164,43 +164,53 @@
 <div class="menu-layer" id="menu-layer"></div>
 
 <div class="dropdown" id="menu-file">
-  <button class="mi" type="button" data-action="new"><span class="label">New</span><span class="kbd">Ctrl+N</span></button>
+  <button class="mi" type="button" data-action="new-tab"><span class="label">New</span><span class="kbd">Ctrl+N</span></button>
+  <button class="mi" type="button" data-action="new-session"><span class="label">New terminal session</span></button>
   <button class="mi disabled" type="button"><span class="label">Open</span><span class="kbd">Ctrl+O</span></button>
   <button class="mi disabled" type="button"><span class="label">Make a copy</span></button>
   <div class="sep"></div>
-  <button class="mi disabled" type="button"><span class="label">Share</span></button>
+  <button class="mi" type="button" data-action="share"><span class="label">Share</span></button>
   <button class="mi disabled" type="button"><span class="label">Email</span></button>
-  <button class="mi disabled" type="button"><span class="label">Download</span></button>
+  <button class="mi" type="button" data-action="download"><span class="label">Download</span><span class="kbd">transcript</span></button>
   <div class="sep"></div>
   <button class="mi disabled" type="button"><span class="label">Version history</span></button>
   <button class="mi disabled" type="button"><span class="label">Rename</span></button>
   <button class="mi disabled" type="button"><span class="label">Move</span></button>
   <div class="sep"></div>
   <button class="mi" type="button" data-action="print"><span class="label">Print</span><span class="kbd">Ctrl+P</span></button>
+  <div class="sep"></div>
+  <button class="mi" type="button" data-action="close"><span class="label">Close</span></button>
 </div>
 
 <div class="dropdown" id="menu-edit">
   <button class="mi" type="button" data-term="undo"><span class="label">Undo</span><span class="kbd">Ctrl+Z</span></button>
   <button class="mi" type="button" data-term="redo"><span class="label">Redo</span><span class="kbd">Ctrl+Y</span></button>
   <div class="sep"></div>
-  <button class="mi" type="button" data-term="cut"><span class="label">Cut</span><span class="kbd">Ctrl+X</span></button>
-  <button class="mi" type="button" data-term="copy"><span class="label">Copy</span><span class="kbd">Ctrl+C</span></button>
-  <button class="mi" type="button" data-term="paste"><span class="label">Paste</span><span class="kbd">Ctrl+V</span></button>
-  <button class="mi" type="button" data-term="select-all"><span class="label">Select all</span><span class="kbd">Ctrl+A</span></button>
+  <button class="mi" type="button" data-action="cut"><span class="label">Cut</span><span class="kbd">Ctrl+X</span></button>
+  <button class="mi" type="button" data-action="copy"><span class="label">Copy</span><span class="kbd">Ctrl+C</span></button>
+  <button class="mi" type="button" data-action="paste"><span class="label">Paste</span><span class="kbd">Ctrl+V</span></button>
+  <button class="mi" type="button" data-action="select-all"><span class="label">Select all</span><span class="kbd">Ctrl+A</span></button>
   <div class="sep"></div>
-  <button class="mi disabled" type="button"><span class="label">Find and replace</span><span class="kbd">Ctrl+H</span></button>
+  <button class="mi" type="button" data-action="find"><span class="label">Find</span><span class="kbd">Ctrl+F</span></button>
 </div>
 
 <div class="dropdown" id="menu-view">
   <button class="mi check" type="button" data-action="toggle-ruler"><span class="label">Show ruler</span></button>
-  <button class="mi" type="button" data-action="toggle-chrome"><span class="label">Full screen</span></button>
+  <button class="mi" type="button" data-action="toggle-chrome"><span class="label">Show menus / chrome</span></button>
+  <button class="mi" type="button" data-action="fullscreen"><span class="label">Full screen</span></button>
   <div class="sep"></div>
-  <button class="mi check" type="button" data-theme="docs"><span class="label">Print layout</span></button>
+  <button class="mi" type="button" data-submenu="zoom"><span class="label">Zoom</span><span class="arrow">▶</span></button>
+  <button class="mi" type="button" data-action="font-inc"><span class="label">Increase font size</span><span class="kbd">Ctrl+Shift+.</span></button>
+  <button class="mi" type="button" data-action="font-dec"><span class="label">Decrease font size</span><span class="kbd">Ctrl+Shift+,</span></button>
   <div class="sep"></div>
-  <button class="mi" type="button" data-submenu="theme"><span class="label">Terminal appearance</span><span class="arrow">▶</span></button>
+  <button class="mi" type="button" data-submenu="highlight"><span class="label">Terminal appearance</span><span class="arrow">▶</span></button>
 </div>
 
 <div class="dropdown" id="menu-insert">
+  <button class="mi" type="button" data-action="insert-newline"><span class="label">New line</span><span class="kbd">Enter</span></button>
+  <button class="mi" type="button" data-action="clear-screen"><span class="label">Clear screen</span></button>
+  <button class="mi" type="button" data-action="form-feed"><span class="label">Form feed</span><span class="kbd">Ctrl+L</span></button>
+  <div class="sep"></div>
   <button class="mi disabled" type="button"><span class="label">Image</span></button>
   <button class="mi disabled" type="button"><span class="label">Table</span></button>
   <button class="mi disabled" type="button"><span class="label">Drawing</span></button>
@@ -209,16 +219,13 @@
   <div class="sep"></div>
   <button class="mi disabled" type="button"><span class="label">Link</span><span class="kbd">Ctrl+K</span></button>
   <button class="mi disabled" type="button"><span class="label">Comment</span><span class="kbd">Ctrl+Alt+M</span></button>
-  <div class="sep"></div>
-  <button class="mi disabled" type="button"><span class="label">Page numbers</span></button>
-  <button class="mi disabled" type="button"><span class="label">Break</span></button>
 </div>
 
 <div class="dropdown" id="menu-format">
   <button class="mi" type="button" data-submenu="text"><span class="label">Text</span><span class="arrow">▶</span></button>
   <button class="mi" type="button" data-submenu="size"><span class="label">Size</span><span class="arrow">▶</span></button>
   <button class="mi" type="button" data-submenu="color"><span class="label">Text color</span><span class="arrow">▶</span></button>
-  <button class="mi" type="button" data-submenu="theme"><span class="label">Terminal theme</span><span class="arrow">▶</span></button>
+  <button class="mi" type="button" data-submenu="highlight"><span class="label">Highlight color</span><span class="arrow">▶</span></button>
   <div class="sep"></div>
   <button class="mi disabled" type="button"><span class="label">Paragraph styles</span><span class="arrow">▶</span></button>
   <button class="mi disabled" type="button"><span class="label">Align &amp; indent</span><span class="arrow">▶</span></button>
@@ -226,14 +233,16 @@
   <button class="mi disabled" type="button"><span class="label">Columns</span></button>
   <button class="mi disabled" type="button"><span class="label">Bullets &amp; numbering</span></button>
   <div class="sep"></div>
-  <button class="mi" type="button" data-action="reset-format"><span class="label">Clear formatting</span><span class="kbd">Ctrl+\\</span></button>
+  <button class="mi" type="button" data-action="reset-format"><span class="label">Clear formatting</span><span class="kbd">Ctrl+\</span></button>
 </div>
 
 <div class="dropdown" id="menu-tools">
+  <button class="mi" type="button" data-action="about"><span class="label">About docs-term</span></button>
+  <button class="mi" type="button" data-action="shortcuts"><span class="label">Keyboard shortcuts</span><span class="kbd">Ctrl+/</span></button>
+  <div class="sep"></div>
+  <button class="mi" type="button" data-submenu="highlight"><span class="label">Terminal appearance</span><span class="arrow">▶</span></button>
   <button class="mi disabled" type="button"><span class="label">Spelling and grammar</span></button>
-  <button class="mi disabled" type="button"><span class="label">Word count</span><span class="kbd">Ctrl+Shift+C</span></button>
-  <button class="mi disabled" type="button"><span class="label">Review suggested edits</span></button>
-  <button class="mi disabled" type="button"><span class="label">Compare documents</span></button>
+  <button class="mi disabled" type="button"><span class="label">Word count</span></button>
   <div class="sep"></div>
   <button class="mi disabled" type="button"><span class="label">Preferences</span></button>
   <button class="mi disabled" type="button"><span class="label">Accessibility</span></button>
@@ -245,11 +254,13 @@
 </div>
 
 <div class="dropdown" id="menu-help">
-  <button class="mi" type="button" data-action="help"><span class="label">docs-term help</span></button>
+  <button class="mi" type="button" data-action="about"><span class="label">About docs-term</span></button>
   <button class="mi disabled" type="button"><span class="label">Help Docs</span></button>
   <button class="mi disabled" type="button"><span class="label">Training</span></button>
   <div class="sep"></div>
   <button class="mi" type="button" data-action="shortcuts"><span class="label">Keyboard shortcuts</span><span class="kbd">Ctrl+/</span></button>
+</div>
+<button class="mi" type="button" data-action="shortcuts"><span class="label">Keyboard shortcuts</span><span class="kbd">Ctrl+/</span></button>
 </div>
 
 <div class="submenu" id="sub-text">
@@ -275,11 +286,33 @@
   <div class="color-grid" id="color-grid"></div>
 </div>
 
-<div class="submenu" id="sub-theme">
-  <button class="mi check" type="button" data-theme="docs"><span class="label">Docs light</span></button>
+<div class="submenu" id="sub-highlight">
+  <button class="mi check" type="button" data-theme="docs"><span class="label">Docs light page</span></button>
   <button class="mi" type="button" data-theme="classic"><span class="label">Classic dark</span></button>
+  <button class="mi" type="button" data-theme="ansi"><span class="label">Real terminal ANSI colors</span></button>
   <button class="mi" type="button" data-theme="solarized-light"><span class="label">Solarized light</span></button>
   <button class="mi" type="button" data-theme="solarized-dark"><span class="label">Solarized dark</span></button>
+  <div class="sep"></div>
+  <button class="mi" type="button" data-action="toggle-no-bg"><span class="label">No cell backgrounds</span></button>
+</div>
+
+<div class="submenu" id="sub-theme">
+  <button class="mi check" type="button" data-theme="docs"><span class="label">Docs light page</span></button>
+  <button class="mi" type="button" data-theme="classic"><span class="label">Classic dark</span></button>
+  <button class="mi" type="button" data-theme="ansi"><span class="label">Real terminal ANSI colors</span></button>
+  <button class="mi" type="button" data-theme="solarized-light"><span class="label">Solarized light</span></button>
+  <button class="mi" type="button" data-theme="solarized-dark"><span class="label">Solarized dark</span></button>
+  <div class="sep"></div>
+  <button class="mi" type="button" data-action="toggle-no-bg"><span class="label">No cell backgrounds</span></button>
+</div>
+
+<div class="submenu" id="sub-zoom">
+  <button class="mi" type="button" data-zoom="75"><span class="label">75%</span></button>
+  <button class="mi" type="button" data-zoom="90"><span class="label">90%</span></button>
+  <button class="mi" type="button" data-zoom="100"><span class="label">100%</span></button>
+  <button class="mi" type="button" data-zoom="125"><span class="label">125%</span></button>
+  <button class="mi" type="button" data-zoom="150"><span class="label">150%</span></button>
+  <button class="mi" type="button" data-zoom="200"><span class="label">200%</span></button>
 </div>
 
 <div class="modal-back" id="share-modal">
@@ -291,6 +324,51 @@
     <div class="dialog-actions">
       <button class="btn-text" type="button" id="share-copy">Copy link</button>
       <button class="btn-filled" type="button" id="share-done">Done</button>
+    </div>
+  </div>
+</div>
+
+
+<div class="modal-back" id="find-modal">
+  <div class="dialog find-dialog" role="dialog" aria-labelledby="find-title">
+    <h2 id="find-title">Find</h2>
+    <input class="share-field" id="find-input" type="search" placeholder="Find in scrollback" autocomplete="off">
+    <p class="find-status" id="find-status"></p>
+    <div class="dialog-actions">
+      <button class="btn-text" type="button" id="find-prev">Previous</button>
+      <button class="btn-text" type="button" id="find-next">Next</button>
+      <button class="btn-filled" type="button" id="find-close">Done</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-back" id="about-modal">
+  <div class="dialog" role="dialog" aria-labelledby="about-title">
+    <h2 id="about-title">About docs-term</h2>
+    <p>A localhost Google Docs–lookalike that is a real Linux terminal (PTY via node-pty + xterm.js).</p>
+    <p>Shell prompts often set <strong>cell backgrounds</strong> (ANSI SGR 40–47 / 48 / 100–107). On a white Docs page those paint as a black strip. Use <strong>Highlight → No cell backgrounds</strong> to rewrite those codes to default (49) before display, keeping foreground colors.</p>
+    <p>Bound to localhost only. Do not expose the port.</p>
+    <div class="dialog-actions">
+      <button class="btn-filled" type="button" id="about-done">Done</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-back" id="shortcuts-modal">
+  <div class="dialog" role="dialog" aria-labelledby="shortcuts-title">
+    <h2 id="shortcuts-title">Keyboard shortcuts</h2>
+    <ul class="shortcut-list">
+      <li><kbd>Ctrl/Cmd + Shift + .</kbd> Increase font size</li>
+      <li><kbd>Ctrl/Cmd + Shift + ,</kbd> Decrease font size</li>
+      <li><kbd>Ctrl/Cmd + B</kbd> Bold</li>
+      <li><kbd>Ctrl/Cmd + F</kbd> Find in scrollback</li>
+      <li><kbd>Ctrl/Cmd + P</kbd> Print</li>
+      <li><kbd>Ctrl/Cmd + N</kbd> New terminal tab</li>
+      <li><kbd>Ctrl/Cmd + /</kbd> This shortcuts list</li>
+      <li><kbd>Esc</kbd> Close menus / dialogs</li>
+    </ul>
+    <div class="dialog-actions">
+      <button class="btn-filled" type="button" id="shortcuts-done">Done</button>
     </div>
   </div>
 </div>
