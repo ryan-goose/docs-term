@@ -1,0 +1,21 @@
+{
+  "name": "docs-term",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Localhost terminal that looks like a blank Google Docs page (real PTY)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "postinstall": "node scripts/copy-vendor.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "express": "^5.1.0",
+    "node-pty": "^1.1.0",
+    "ws": "^8.18.3"
+  }
+}
