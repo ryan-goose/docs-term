@@ -784,8 +784,10 @@
     const sbr = document.getElementById('settings-scrollback-range');
     if (sb) sb.value = String(state.scrollbackLines);
     if (sbr) sbr.value = String(state.scrollbackLines);
-    document.getElementById('settings-dark').checked = state.darkChrome;
-    document.getElementById('settings-no-bg').checked = state.noCellBg;
+    const darkEl = document.getElementById('settings-dark');
+    if (darkEl) darkEl.checked = state.darkChrome;
+    const nobgEl = document.getElementById('settings-no-bg');
+    if (nobgEl) nobgEl.checked = state.noCellBg;
     syncLayoutEditButton();
   }
 
@@ -812,10 +814,16 @@
     const smoothEl = document.getElementById('settings-smooth-scroll');
     if (smoothEl) setSmoothScroll(smoothEl.checked);
     setScrollbackLines(num('settings-scrollback', state.scrollbackLines, 500, 50000), { skipSave: true });
-    setDarkChrome(document.getElementById('settings-dark').checked);
-    const nobg = document.getElementById('settings-no-bg').checked;
-    if (nobg !== state.noCellBg) setNoCellBg(nobg);
-    else savePrefs();
+    const darkCb = document.getElementById('settings-dark');
+    if (darkCb) setDarkChrome(darkCb.checked);
+    const nobgCb = document.getElementById('settings-no-bg');
+    if (nobgCb) {
+      const nobg = nobgCb.checked;
+      if (nobg !== state.noCellBg) setNoCellBg(nobg);
+      else savePrefs();
+    } else {
+      savePrefs();
+    }
   }
 
   function fillPageSetupForm() {
@@ -864,10 +872,25 @@
     else savePrefs();
   }
 
+  function openModalById(id) {
+    const el = document.getElementById(id);
+    if (!el) {
+      console.error('Missing modal:', id);
+      snack('Could not open dialog');
+      return false;
+    }
+    el.classList.add('show');
+    return true;
+  }
+
   function openPageSetup() {
     hideMenus();
-    fillPageSetupForm();
-    document.getElementById('page-setup-modal').classList.add('show');
+    try {
+      fillPageSetupForm();
+    } catch (err) {
+      console.error('fillPageSetupForm', err);
+    }
+    openModalById('page-setup-modal');
   }
 
   function closePageSetup(apply) {
@@ -877,8 +900,12 @@
 
   function openScrolling() {
     hideMenus();
-    fillScrollingForm();
-    document.getElementById('scrolling-modal').classList.add('show');
+    try {
+      fillScrollingForm();
+    } catch (err) {
+      console.error('fillScrollingForm', err);
+    }
+    openModalById('scrolling-modal');
   }
 
   function closeScrolling(apply) {
