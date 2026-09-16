@@ -164,6 +164,14 @@
 
   const prefs = loadPrefs();
 
+  const DEFAULT_LAYOUT = {
+    pageWidth: 816,
+    marginTop: 96,
+    marginRight: 96,
+    marginBottom: 96,
+    marginLeft: 96,
+  };
+
   const state = {
     fontSize: Number(prefs.fontSize) || 14,
     fontFamily: FONT_STACKS[prefs.fontName] || FONT_STACKS['Courier New'],
@@ -179,6 +187,13 @@
     commentsOpen: !!prefs.commentsOpen,
     sessionId: prefs.sessionId || null,
     cwd: prefs.cwd || '',
+    darkChrome: !!prefs.darkChrome,
+    layoutEdit: !!prefs.layoutEdit,
+    pageWidth: prefs.pageWidth != null ? Number(prefs.pageWidth) : DEFAULT_LAYOUT.pageWidth,
+    marginTop: prefs.marginTop != null ? Number(prefs.marginTop) : DEFAULT_LAYOUT.marginTop,
+    marginRight: prefs.marginRight != null ? Number(prefs.marginRight) : DEFAULT_LAYOUT.marginRight,
+    marginBottom: prefs.marginBottom != null ? Number(prefs.marginBottom) : DEFAULT_LAYOUT.marginBottom,
+    marginLeft: prefs.marginLeft != null ? Number(prefs.marginLeft) : DEFAULT_LAYOUT.marginLeft,
   };
 
   let sessions = [];
@@ -187,36 +202,50 @@
   let sshProfiles = [];
   let lastCommand = '';
   let inputLineBuf = '';
-  let pendingPaste = null;
+  let pendingPasteLines = [];
+  let pasteCursor = 0;
+  let pasteConfirmAllBusy = false;
   let findMatches = [];
   let findIndex = -1;
   let outlineTimer = null;
+  let layoutDrag = null;
 
   function uid() {
     return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   }
 
+  function prefsPayload() {
+    return {
+      themeName: state.themeName,
+      noCellBg: state.noCellBg,
+      fontSize: state.fontSize,
+      fontName: state.fontName,
+      fg: state.fg,
+      bold: state.bold,
+      ruler: state.ruler,
+      chrome: state.chrome,
+      zoom: state.zoom,
+      outlineOpen: state.outlineOpen,
+      commentsOpen: state.commentsOpen,
+      sessionId: state.sessionId,
+      cwd: state.cwd,
+      darkChrome: state.darkChrome,
+      layoutEdit: state.layoutEdit,
+      pageWidth: state.pageWidth,
+      marginTop: state.marginTop,
+      marginRight: state.marginRight,
+      marginBottom: state.marginBottom,
+      marginLeft: state.marginLeft,
+    };
+  }
+
   function savePrefs() {
+    const payload = prefsPayload();
     try {
-      localStorage.setItem(
-        PREFS_KEY,
-        JSON.stringify({
-          themeName: state.themeName,
-          noCellBg: state.noCellBg,
-          fontSize: state.fontSize,
-          fontName: state.fontName,
-          fg: state.fg,
-          bold: state.bold,
-          ruler: state.ruler,
-          chrome: state.chrome,
-          zoom: state.zoom,
-          outlineOpen: state.outlineOpen,
-          commentsOpen: state.commentsOpen,
-          sessionId: state.sessionId,
-          cwd: state.cwd,
-        })
-      );
+      localStorage.setItem(PREFS_KEY, JSON.stringify(payload));
     } catch (_) {}
+    // Fire-and-forget disk sync (same store used by named sessions etc.)
+    configPut('prefs', payload);
   }
 
   function lsGet(key, fallback) {
@@ -476,6 +505,9 @@
     document.querySelectorAll('[data-action="toggle-comments"]').forEach((el) =>
       el.classList.toggle('check', state.commentsOpen)
     );
+    document.querySelectorAll('[data-action="toggle-dark"]').forEach((el) =>
+      el.classList.toggle('check', state.darkChrome)
+    );
   }
 
   function applyTheme(name) {
@@ -563,6 +595,135 @@
     snack(state.noCellBg ? 'No cell backgrounds: on (SGR bg → default)' : 'No cell backgrounds: off');
   }
 
+  function applyPageLayout() {
+    const root = document.documentElement;
+    const w = Math.max(480, Math.min(1600, Number(state.pageWidth) || DEFAULT_LAYOUT.pageWidth));
+    state.pageWidth = w;
+    root.style.setProperty('--page-width', w + 'px');
+    root.style.setProperty('--page-margin-top', (Number(state.marginTop) || 0) + 'px');
+    root.style.setProperty('--page-margin-right', (Number(state.marginRight) || 0) + 'px');
+    root.style.setProperty('--page-margin-bottom', (Number(state.marginBottom) || 0) + 'px');
+    root.style.setProperty('--page-margin-left', (Number(state.marginLeft) || 0) + 'px');
+    const rulerInner = document.querySelector('.ruler-inner');
+    if (rulerInner) rulerInner.style.width = w + 'px';
+    requestAnimationFrame(sendResize);
+  }
+
+  function setLayoutEdit(on) {
+    state.layoutEdit = !!on;
+    document.body.classList.toggle('layout-edit', state.layoutEdit);
+    const cb = document.getElementById('settings-layout-mode');
+    if (cb) cb.checked = state.layoutEdit;
+    savePrefs();
+  }
+
+  function setDarkChrome(on) {
+    state.darkChrome = !!on;
+    document.body.classList.toggle('dark-chrome', state.darkChrome);
+    const cb = document.getElementById('settings-dark');
+    if (cb) cb.checked = state.darkChrome;
+    syncThemeChecks();
+    savePrefs();
+  }
+
+  function fillSettingsForm() {
+    const w = document.getElementById('settings-page-width');
+    if (!w) return;
+    w.value = String(state.pageWidth);
+    document.getElementById('settings-margin-top').value = String(state.marginTop);
+    document.getElementById('settings-margin-bottom').value = String(state.marginBottom);
+    document.getElementById('settings-margin-left').value = String(state.marginLeft);
+    document.getElementById('settings-margin-right').value = String(state.marginRight);
+    document.getElementById('settings-layout-mode').checked = state.layoutEdit;
+    document.getElementById('settings-dark').checked = state.darkChrome;
+    document.getElementById('settings-no-bg').checked = state.noCellBg;
+  }
+
+  function readSettingsForm() {
+    const num = (id, fallback, min, max) => {
+      const v = Number(document.getElementById(id).value);
+      if (!Number.isFinite(v)) return fallback;
+      return Math.max(min, Math.min(max, v));
+    };
+    state.pageWidth = num('settings-page-width', state.pageWidth, 480, 1600);
+    state.marginTop = num('settings-margin-top', state.marginTop, 0, 240);
+    state.marginBottom = num('settings-margin-bottom', state.marginBottom, 0, 240);
+    state.marginLeft = num('settings-margin-left', state.marginLeft, 0, 240);
+    state.marginRight = num('settings-margin-right', state.marginRight, 0, 240);
+    applyPageLayout();
+    setLayoutEdit(document.getElementById('settings-layout-mode').checked);
+    setDarkChrome(document.getElementById('settings-dark').checked);
+    const nobg = document.getElementById('settings-no-bg').checked;
+    if (nobg !== state.noCellBg) setNoCellBg(nobg);
+    else savePrefs();
+  }
+
+  function openSettings() {
+    hideMenus();
+    fillSettingsForm();
+    document.getElementById('settings-modal').classList.add('show');
+  }
+
+  function closeSettings(apply) {
+    if (apply) readSettingsForm();
+    hideModal('settings-modal');
+  }
+
+  function resetLayoutDefaults() {
+    state.pageWidth = DEFAULT_LAYOUT.pageWidth;
+    state.marginTop = DEFAULT_LAYOUT.marginTop;
+    state.marginRight = DEFAULT_LAYOUT.marginRight;
+    state.marginBottom = DEFAULT_LAYOUT.marginBottom;
+    state.marginLeft = DEFAULT_LAYOUT.marginLeft;
+    fillSettingsForm();
+    applyPageLayout();
+    savePrefs();
+    snack('Page layout reset');
+  }
+
+  function initPageResizeHandles() {
+    const page = document.getElementById('page');
+    const left = document.getElementById('page-resize-left');
+    const right = document.getElementById('page-resize-right');
+    if (!page || !left || !right) return;
+
+    function onMove(e) {
+      if (!layoutDrag) return;
+      const canvas = document.getElementById('canvas');
+      const rect = canvas.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const half = Math.abs(e.clientX - centerX);
+      const next = Math.max(480, Math.min(1600, Math.round(half * 2)));
+      // Snap to 8px
+      state.pageWidth = Math.round(next / 8) * 8;
+      applyPageLayout();
+      const wEl = document.getElementById('settings-page-width');
+      if (wEl) wEl.value = String(state.pageWidth);
+    }
+
+    function onUp() {
+      if (!layoutDrag) return;
+      layoutDrag = null;
+      document.body.classList.remove('layout-dragging');
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      savePrefs();
+    }
+
+    function start(side, e) {
+      if (!state.layoutEdit) return;
+      e.preventDefault();
+      layoutDrag = { side: side };
+      document.body.classList.add('layout-dragging');
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    }
+
+    left.addEventListener('pointerdown', (e) => start('left', e));
+    right.addEventListener('pointerdown', (e) => start('right', e));
+  }
+
+
   function snack(text) {
     const el = document.getElementById('snackbar');
     el.textContent = text;
@@ -618,34 +779,139 @@
     snack('Transcript downloaded');
   }
 
-  /* ----- Smart paste (bracketed + multiline confirm) ----- */
+  /* ----- Smart paste (bracketed + multiline suggestion mode) ----- */
   function bracketedPaste(text) {
     return '\x1b[200~' + text + '\x1b[201~';
   }
 
+  function splitPasteLines(text) {
+    const normalized = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = normalized.split('\n');
+    // Drop a trailing empty entry from a final newline so we don't queue a blank confirm.
+    if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
+    return lines;
+  }
+
   function isMultilinePaste(text) {
-    return /[\r\n]/.test(text) && text.replace(/\r\n/g, '\n').split('\n').length > 1;
+    return splitPasteLines(text).length > 1;
   }
 
   function doPaste(text) {
     if (!text) return;
     sendInput(bracketedPaste(text));
-    trackTypedInput(text.endsWith('\n') || text.endsWith('\r') ? text : text);
+    trackTypedInput(text);
+  }
+
+  /** Send one confirmed line with newline via bracketed paste (default for suggestion mode). */
+  function pasteConfirmedLine(line) {
+    const payload = String(line) + '\n';
+    sendInput(bracketedPaste(payload));
+    trackTypedInput(payload);
+  }
+
+  function renderPasteSuggestion() {
+    const total = pendingPasteLines.length;
+    const remaining = Math.max(0, total - pasteCursor);
+    const cur = pendingPasteLines[pasteCursor];
+    document.getElementById('paste-lines').textContent = String(total);
+    document.getElementById('paste-index').textContent = String(Math.min(pasteCursor + 1, total || 1));
+    document.getElementById('paste-remaining').textContent = String(remaining);
+    document.getElementById('paste-current').textContent =
+      cur === undefined ? '(done)' : cur === '' ? '(empty line)' : cur;
+    const queued = pendingPasteLines.slice(pasteCursor + 1);
+    const preview = document.getElementById('paste-preview');
+    preview.textContent =
+      queued.length === 0
+        ? '(none)'
+        : queued.slice(0, 40).join('\n') + (queued.length > 40 ? '\n…' : '');
+    const busy = pasteConfirmAllBusy || remaining === 0;
+    document.getElementById('paste-confirm').disabled = busy || remaining === 0;
+    document.getElementById('paste-skip').disabled = busy || remaining === 0;
+    document.getElementById('paste-confirm-all').disabled = busy || remaining === 0;
+  }
+
+  function openPasteSuggestion(lines) {
+    pendingPasteLines = lines.slice();
+    pasteCursor = 0;
+    pasteConfirmAllBusy = false;
+    hideMenus();
+    renderPasteSuggestion();
+    document.getElementById('paste-modal').classList.add('show');
+  }
+
+  function closePasteSuggestion() {
+    pendingPasteLines = [];
+    pasteCursor = 0;
+    pasteConfirmAllBusy = false;
+    hideModal('paste-modal');
+  }
+
+  function confirmPasteOne() {
+    if (pasteConfirmAllBusy) return;
+    if (pasteCursor >= pendingPasteLines.length) {
+      closePasteSuggestion();
+      return;
+    }
+    const line = pendingPasteLines[pasteCursor];
+    pasteCursor += 1;
+    pasteConfirmedLine(line);
+    if (pasteCursor >= pendingPasteLines.length) {
+      closePasteSuggestion();
+      snack('Paste complete');
+      return;
+    }
+    renderPasteSuggestion();
+  }
+
+  function skipPasteOne() {
+    if (pasteConfirmAllBusy) return;
+    if (pasteCursor >= pendingPasteLines.length) {
+      closePasteSuggestion();
+      return;
+    }
+    pasteCursor += 1;
+    if (pasteCursor >= pendingPasteLines.length) {
+      closePasteSuggestion();
+      snack('Paste cancelled (all skipped)');
+      return;
+    }
+    renderPasteSuggestion();
+  }
+
+  function confirmPasteAll() {
+    if (pasteConfirmAllBusy) return;
+    if (pasteCursor >= pendingPasteLines.length) {
+      closePasteSuggestion();
+      return;
+    }
+    pasteConfirmAllBusy = true;
+    renderPasteSuggestion();
+    const step = () => {
+      if (pasteCursor >= pendingPasteLines.length) {
+        pasteConfirmAllBusy = false;
+        closePasteSuggestion();
+        snack('Paste complete');
+        return;
+      }
+      const line = pendingPasteLines[pasteCursor];
+      pasteCursor += 1;
+      pasteConfirmedLine(line);
+      renderPasteSuggestion();
+      // Sequential confirm of remaining lines with a short gap for the PTY.
+      setTimeout(step, 40);
+    };
+    step();
   }
 
   function smartPaste(text) {
     if (!text) return;
-    if (isMultilinePaste(text)) {
-      pendingPaste = text;
-      const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-      document.getElementById('paste-lines').textContent = String(lines.length);
-      const preview = document.getElementById('paste-preview');
-      preview.textContent = lines.slice(0, 40).join('\n') + (lines.length > 40 ? '\n…' : '');
-      hideMenus();
-      document.getElementById('paste-modal').classList.add('show');
+    const lines = splitPasteLines(text);
+    if (lines.length > 1) {
+      openPasteSuggestion(lines);
       return;
     }
-    doPaste(text);
+    // Single-line paste stays immediate (bracketed).
+    doPaste(lines[0] !== undefined ? lines[0] : text);
   }
 
   function pasteClipboard() {
@@ -1700,6 +1966,14 @@
       case 'shortcuts':
         showShortcuts();
         return;
+      case 'settings':
+      case 'page-setup':
+        openSettings();
+        return;
+      case 'toggle-dark':
+        setDarkChrome(!state.darkChrome);
+        snack(state.darkChrome ? 'Dark chrome on' : 'Dark chrome off');
+        break;
       case 'share':
         document.getElementById('share-url').value = location.href;
         document.getElementById('share-modal').classList.add('show');
@@ -1819,20 +2093,34 @@
   });
 
   document.getElementById('paste-cancel').addEventListener('click', () => {
-    pendingPaste = null;
-    hideModal('paste-modal');
+    closePasteSuggestion();
+    snack('Paste cancelled');
   });
-  document.getElementById('paste-confirm').addEventListener('click', () => {
-    const t = pendingPaste;
-    pendingPaste = null;
-    hideModal('paste-modal');
-    if (t) doPaste(t);
-  });
+  document.getElementById('paste-confirm').addEventListener('click', () => confirmPasteOne());
+  document.getElementById('paste-skip').addEventListener('click', () => skipPasteOne());
+  document.getElementById('paste-confirm-all').addEventListener('click', () => confirmPasteAll());
   document.getElementById('paste-modal').addEventListener('click', (e) => {
-    if (e.target.id === 'paste-modal') {
-      pendingPaste = null;
-      hideModal('paste-modal');
-    }
+    if (e.target.id === 'paste-modal') closePasteSuggestion();
+  });
+
+  document.getElementById('settings-done').addEventListener('click', () => closeSettings(true));
+  document.getElementById('settings-reset-layout').addEventListener('click', () => resetLayoutDefaults());
+  document.getElementById('settings-layout-mode').addEventListener('change', (e) => {
+    setLayoutEdit(e.target.checked);
+  });
+  document.getElementById('settings-dark').addEventListener('change', (e) => {
+    setDarkChrome(e.target.checked);
+  });
+  document.getElementById('settings-no-bg').addEventListener('change', (e) => {
+    setNoCellBg(e.target.checked);
+  });
+  ['settings-page-width', 'settings-margin-top', 'settings-margin-bottom', 'settings-margin-left', 'settings-margin-right'].forEach((id) => {
+    document.getElementById(id).addEventListener('change', () => {
+      readSettingsForm();
+    });
+  });
+  document.getElementById('settings-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'settings-modal') closeSettings(true);
   });
 
   document.getElementById('sessions-done').addEventListener('click', () => hideModal('sessions-modal'));
@@ -1878,8 +2166,11 @@
       'ssh-modal',
       'bookmarks-modal',
       'comment-modal',
+      'settings-modal',
     ].forEach(hideModal);
-    pendingPaste = null;
+    pendingPasteLines = [];
+    pasteCursor = 0;
+    pasteConfirmAllBusy = false;
     closeFind();
   }
 
@@ -1955,7 +2246,11 @@
   applyZoom(state.zoom);
   setOutlineOpen(state.outlineOpen);
   setCommentsOpen(state.commentsOpen);
+  applyPageLayout();
+  document.body.classList.toggle('dark-chrome', state.darkChrome);
+  document.body.classList.toggle('layout-edit', state.layoutEdit);
   syncThemeChecks();
+  initPageResizeHandles();
 
   (async function bootStores() {
     sessions = (await loadStore('sessions', LS.sessions, [])) || [];
@@ -1966,6 +2261,27 @@
     if (!Array.isArray(bookmarks)) bookmarks = [];
     if (!Array.isArray(comments)) comments = [];
     if (!Array.isArray(sshProfiles)) sshProfiles = [];
+    // Merge disk prefs if present (layout / dark chrome) without wiping localStorage wins on conflict:
+    // prefer localStorage already loaded; fill only missing keys from disk.
+    try {
+      const diskPrefs = await configGet('prefs');
+      if (diskPrefs && typeof diskPrefs === 'object') {
+        let changed = false;
+        ['darkChrome', 'layoutEdit', 'pageWidth', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'noCellBg'].forEach((k) => {
+          if (prefs[k] === undefined && diskPrefs[k] !== undefined) {
+            state[k] = diskPrefs[k];
+            changed = true;
+          }
+        });
+        if (changed) {
+          applyPageLayout();
+          document.body.classList.toggle('dark-chrome', !!state.darkChrome);
+          document.body.classList.toggle('layout-edit', !!state.layoutEdit);
+          syncThemeChecks();
+          savePrefs();
+        }
+      }
+    } catch (_) {}
     renderBookmarksUI();
     renderComments();
     renderOutline();

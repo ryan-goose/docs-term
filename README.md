@@ -69,7 +69,14 @@ Use the toolbar **Highlight** button (or **Format → Highlight color** / **View
 | **Solarized light / dark** | Solarized themes |
 | **No cell backgrounds** | Toggle: rewrite SGR bg → `49` (default) **before** `term.write`; keeps fg colors; page stays white |
 
-Prefs (theme, no-bg, font size/family, zoom, ruler/chrome, panel open state) persist in `localStorage` (`docs-term-prefs`). Named sessions, bookmarks, comments, and SSH profiles also sync to `~/.config/docs-term/*.json` via `/api/config/:name`.
+Prefs (theme, no-bg, dark chrome, page width/margins, layout-edit, font size/family, zoom, ruler/chrome, panel open state) persist in `localStorage` (`docs-term-prefs`) and sync to `~/.config/docs-term/prefs.json`. Named sessions, bookmarks, comments, and SSH profiles also sync via `/api/config/:name`.
+
+
+## New: paste suggestions, page layout, dark chrome
+
+- **Multiline paste → suggestion mode** (default): queued lines with Confirm / Skip / Confirm all / Cancel; Confirm all walks remaining lines sequentially. Single-line paste is unchanged.
+- **Settings / Page setup**: enter layout edit mode to drag the white page wider/narrower; set margins like Docs page setup; persisted.
+- **Dark mode**: Docs-like dark chrome for bars, menus, canvas, and side panels (orthogonal to terminal Highlight+ themes).
 
 ## Features
 
@@ -82,7 +89,9 @@ Prefs (theme, no-bg, font size/family, zoom, ruler/chrome, panel open state) per
 | 6 | **Outline** | View → Show outline; auto list of recent commands; click to scroll |
 | 8 | **SSH profile picker** | File → Open connection…; writes `ssh user@host` into the PTY; profiles local only (no secrets in git) |
 | 10 | **Export PDF / .docx** | File → Export as PDF… / Export as .docx… (client-side) |
-| 11 | **Smart paste** | Multiline paste asks for confirm; uses **bracketed paste** |
+| 11 | **Smart paste / suggestion mode** | Multiline paste opens a Docs-like queue: **Confirm / Skip / Confirm all / Cancel**; each Confirm sends one line + newline via **bracketed paste**. Single-line paste stays immediate. |
+| 12 | **Page layout / Settings** | Tools → Settings or File → Page setup: edit/layout mode (drag page edges), margins (T/B/L/R), page width; prefs in `localStorage` + `~/.config/docs-term/prefs.json` |
+| 13 | **Dark chrome** | View → Dark mode (also Highlight+ / Settings): full Google Docs–style dark UI (top bar, menus, canvas, side panels). Terminal themes + no-cell-bg still apply to the page surface. |
 | 17 | **Keyboard cheat-sheet** | Help → Keyboard shortcuts (`Ctrl/Cmd+/`) |
 | 20 | **Artix .desktop launcher** | `packaging/docs-term.desktop` → install with `scripts/install-desktop.sh` |
 
@@ -90,12 +99,12 @@ Prefs (theme, no-bg, font size/family, zoom, ruler/chrome, panel open state) per
 
 | Menu | Wired actions |
 | --- | --- |
-| **File** | New tab, New session, Open connection (SSH), Named sessions, Save session, Share, Download .txt, Export PDF/.docx, Rename, Print, Close |
+| **File** | New tab, New session, Open connection (SSH), Named sessions, Save session, Share, Download .txt, Export PDF/.docx, Rename, Page setup, Print, Close |
 | **Edit** | Undo/Redo, Cut/Copy/Paste (smart), Select all, Find and replace, Bookmark last command |
-| **View** | Ruler, chrome, Full screen, Zoom, font size, Outline, Comments, Terminal appearance |
+| **View** | Ruler, chrome, Full screen, Zoom, font size, Outline, Comments, Dark mode, Terminal appearance |
 | **Insert** | New line, Clear screen, Form feed, Comment, Bookmarks |
 | **Format** | Text / Size / Text color / Highlight, Clear formatting |
-| **Tools / Help** | About, Shortcuts, Terminal appearance, Bookmarks, SSH profiles |
+| **Tools / Help** | About, Shortcuts, Terminal appearance, Bookmarks, SSH profiles, Settings / Page setup |
 
 Unavailable Docs chrome items remain disabled or show a snackbar.
 

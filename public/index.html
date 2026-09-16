@@ -163,7 +163,9 @@
     </aside>
     <main class="canvas" id="canvas">
       <div class="page" id="page">
-        <div class="page-body">
+        <div class="page-resize page-resize-left" id="page-resize-left" title="Drag to resize page"></div>
+        <div class="page-resize page-resize-right" id="page-resize-right" title="Drag to resize page"></div>
+        <div class="page-body" id="page-body">
           <div id="terminal"></div>
         </div>
       </div>
@@ -195,6 +197,7 @@
   <div class="sep"></div>
   <button class="mi" type="button" data-action="rename-session"><span class="label">Rename</span></button>
   <div class="sep"></div>
+  <button class="mi" type="button" data-action="page-setup"><span class="label">Page setup</span></button>
   <button class="mi" type="button" data-action="print"><span class="label">Print</span><span class="kbd">Ctrl+P</span></button>
   <div class="sep"></div>
   <button class="mi" type="button" data-action="close"><span class="label">Close</span></button>
@@ -226,6 +229,7 @@
   <button class="mi" type="button" data-action="toggle-outline"><span class="label">Show outline</span></button>
   <button class="mi" type="button" data-action="toggle-comments"><span class="label">Show comments</span></button>
   <div class="sep"></div>
+  <button class="mi" type="button" data-action="toggle-dark"><span class="label">Dark mode</span></button>
   <button class="mi" type="button" data-submenu="highlight"><span class="label">Terminal appearance</span><span class="arrow">▶</span></button>
 </div>
 
@@ -269,7 +273,8 @@
   <button class="mi" type="button" data-action="manage-bookmarks"><span class="label">Command bookmarks…</span></button>
   <button class="mi" type="button" data-action="open-connection"><span class="label">SSH profiles…</span></button>
   <div class="sep"></div>
-  <button class="mi disabled" type="button"><span class="label">Preferences</span></button>
+  <button class="mi" type="button" data-action="settings"><span class="label">Settings</span></button>
+  <button class="mi" type="button" data-action="page-setup"><span class="label">Page setup</span></button>
   <button class="mi disabled" type="button"><span class="label">Accessibility</span></button>
 </div>
 
@@ -324,6 +329,7 @@
   <button class="mi" type="button" data-theme="solarized-light"><span class="label">Solarized light</span></button>
   <button class="mi" type="button" data-theme="solarized-dark"><span class="label">Solarized dark</span></button>
   <div class="sep"></div>
+  <button class="mi" type="button" data-action="toggle-dark"><span class="label">Dark chrome</span></button>
   <button class="mi" type="button" data-action="toggle-no-bg"><span class="label">No cell backgrounds</span></button>
 </div>
 
@@ -334,6 +340,7 @@
   <button class="mi" type="button" data-theme="solarized-light"><span class="label">Solarized light</span></button>
   <button class="mi" type="button" data-theme="solarized-dark"><span class="label">Solarized dark</span></button>
   <div class="sep"></div>
+  <button class="mi" type="button" data-action="toggle-dark"><span class="label">Dark chrome</span></button>
   <button class="mi" type="button" data-action="toggle-no-bg"><span class="label">No cell backgrounds</span></button>
 </div>
 
@@ -415,14 +422,24 @@
 
 
 <div class="modal-back" id="paste-modal">
-  <div class="dialog" role="dialog" aria-labelledby="paste-title">
-    <h2 id="paste-title">Confirm multiline paste</h2>
-    <p>You are about to paste <span id="paste-lines">0</span> lines into the terminal. This can run multiple commands.</p>
-    <pre class="paste-preview" id="paste-preview"></pre>
-    <p class="find-note">Paste uses <strong>bracketed paste</strong> when the shell supports it.</p>
-    <div class="dialog-actions">
+  <div class="dialog wide-dialog paste-suggest-dialog" role="dialog" aria-labelledby="paste-title">
+    <h2 id="paste-title">Paste suggestions</h2>
+    <p>Multiline paste is queued line-by-line (Docs-style). Confirm sends one line + newline; Skip drops the current line.</p>
+    <p class="paste-progress">Line <span id="paste-index">1</span> of <span id="paste-lines">0</span> · <span id="paste-remaining">0</span> remaining</p>
+    <div class="paste-current-wrap">
+      <div class="field-label">Suggested line</div>
+      <pre class="paste-current" id="paste-current"></pre>
+    </div>
+    <div class="paste-queue-wrap">
+      <div class="field-label">Queued</div>
+      <pre class="paste-preview" id="paste-preview"></pre>
+    </div>
+    <p class="find-note">Confirmed lines use <strong>bracketed paste</strong> when the shell supports it.</p>
+    <div class="dialog-actions wrap-actions">
       <button class="btn-text" type="button" id="paste-cancel">Cancel</button>
-      <button class="btn-filled" type="button" id="paste-confirm">Paste</button>
+      <button class="btn-text" type="button" id="paste-skip">Skip</button>
+      <button class="btn-text" type="button" id="paste-confirm-all">Confirm all</button>
+      <button class="btn-filled" type="button" id="paste-confirm">Confirm</button>
     </div>
   </div>
 </div>
@@ -486,6 +503,39 @@
     <div class="dialog-actions">
       <button class="btn-text" type="button" id="comment-cancel">Cancel</button>
       <button class="btn-filled" type="button" id="comment-save">Comment</button>
+    </div>
+  </div>
+</div>
+
+
+<div class="modal-back" id="settings-modal">
+  <div class="dialog wide-dialog" role="dialog" aria-labelledby="settings-title">
+    <h2 id="settings-title">Settings</h2>
+    <p class="find-note">Layout and chrome prefs sync to <code>localStorage</code> and <code>~/.config/docs-term/prefs.json</code>.</p>
+
+    <h3 class="settings-h">Page layout</h3>
+    <div class="settings-row">
+      <label class="settings-check"><input type="checkbox" id="settings-layout-mode"> Edit layout mode (drag page edges)</label>
+    </div>
+    <div class="form-grid settings-grid">
+      <label>Page width (px)<input class="share-field" id="settings-page-width" type="number" min="480" max="1600" step="8"></label>
+      <label>Margin top (px)<input class="share-field" id="settings-margin-top" type="number" min="0" max="240" step="4"></label>
+      <label>Margin bottom (px)<input class="share-field" id="settings-margin-bottom" type="number" min="0" max="240" step="4"></label>
+      <label>Margin left (px)<input class="share-field" id="settings-margin-left" type="number" min="0" max="240" step="4"></label>
+      <label>Margin right (px)<input class="share-field" id="settings-margin-right" type="number" min="0" max="240" step="4"></label>
+    </div>
+
+    <h3 class="settings-h">Appearance</h3>
+    <div class="settings-row">
+      <label class="settings-check"><input type="checkbox" id="settings-dark"> Dark mode (Docs chrome)</label>
+    </div>
+    <div class="settings-row">
+      <label class="settings-check"><input type="checkbox" id="settings-no-bg"> No cell backgrounds (Highlight+)</label>
+    </div>
+
+    <div class="dialog-actions">
+      <button class="btn-text" type="button" id="settings-reset-layout">Reset layout</button>
+      <button class="btn-filled" type="button" id="settings-done">Done</button>
     </div>
   </div>
 </div>
