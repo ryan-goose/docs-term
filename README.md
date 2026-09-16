@@ -69,7 +69,7 @@ Use the toolbar **Highlight** button (or **Format → Highlight color** / **View
 | **Solarized light / dark** | Solarized themes |
 | **No cell backgrounds** | Toggle: rewrite SGR bg → `49` (default) **before** `term.write`; keeps fg colors; page stays white |
 
-Prefs (theme, no-bg, dark chrome, page width/margins, layout-edit, font size/family, zoom, ruler/chrome, panel open state) persist in `localStorage` (`docs-term-prefs`) and sync to `~/.config/docs-term/prefs.json`. Named sessions, bookmarks, comments, and SSH profiles also sync via `/api/config/:name`.
+Prefs (theme, no-bg, dark chrome, page width/margins, layout-edit, font size/family, zoom, ruler/chrome, panel open state) persist in `localStorage` (`docs-term-prefs`) and sync to `~/.config/docs-term/prefs.json`. Named sessions, bookmarks, comments, and SSH profiles **dual-write** to `localStorage` and `~/.config/docs-term/<name>.json` via `/api/config/:name` (localStorage first, then disk; load merges both by id / newest timestamp).
 
 
 ## New: paste suggestions, page layout, dark chrome
@@ -82,7 +82,7 @@ Prefs (theme, no-bg, dark chrome, page width/margins, layout-edit, font size/fam
 
 | # | Feature | Where |
 | --- | --- | --- |
-| 2 | **Named sessions** | File → Named sessions… / Save session (`Ctrl/Cmd+S`); stores name, optional cwd, scrollback |
+| 2 | **Named sessions** | File → Named sessions… / Save session (`Ctrl/Cmd+S`); modal form saves name + optional cwd + scrollback to `localStorage` + `~/.config/docs-term/sessions.json` |
 | 3 | **Comment side panel** | Insert → Comment / comment toolbar / header; View → Show comments |
 | 4 | **Find & replace** | Edit → Find and replace (`Ctrl/Cmd+F`); find jumps in live buffer; replace downloads a transcript copy (cannot rewrite PTY history) |
 | 5 | **Command bookmarks** | Star / Insert → Bookmarks / Tools → Command bookmarks…; Insert pastes into PTY |

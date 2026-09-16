@@ -447,7 +447,11 @@
 <div class="modal-back" id="sessions-modal">
   <div class="dialog wide-dialog" role="dialog" aria-labelledby="sessions-title">
     <h2 id="sessions-title">Named sessions</h2>
-    <p class="find-note">Sessions store name, optional cwd, and scrollback text locally (<code>localStorage</code> + <code>~/.config/docs-term</code>).</p>
+    <p class="find-note">Dual-write: <code>localStorage</code> (<code>docs-term-sessions</code>) and <code>~/.config/docs-term/sessions.json</code> via <code>/api/config/sessions</code>. Save uses the form below (no <code>window.prompt</code>).</p>
+    <div class="form-grid session-save-form">
+      <label class="span-2">Session name<input class="share-field" id="session-name" placeholder="Untitled document" autocomplete="off"></label>
+      <label class="span-2">Working directory (optional)<input class="share-field" id="session-cwd" placeholder="/home/you/project" autocomplete="off"></label>
+    </div>
     <div class="side-list modal-list" id="sessions-list"></div>
     <div class="dialog-actions">
       <button class="btn-text" type="button" id="sessions-save">Save current</button>

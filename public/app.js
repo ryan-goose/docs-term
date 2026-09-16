@@ -285,17 +285,46 @@
     } catch (_) {}
   }
 
-  async function loadStore(name, lsKey, fallback) {
-    const local = lsGet(lsKey, fallback);
-    const remote = await configGet(name);
-    if (remote == null) return local || fallback;
-    if (Array.isArray(remote) && Array.isArray(local)) {
-      return remote.length >= local.length ? remote : local;
-    }
-    return remote;
+  /** Merge array stores by id; newest savedAt/createdAt wins. */
+  function mergeByIdNewest(a, b) {
+    const map = new Map();
+    const stamp = (item) => String((item && (item.savedAt || item.createdAt)) || '');
+    (Array.isArray(a) ? a : []).concat(Array.isArray(b) ? b : []).forEach((item) => {
+      if (!item || item.id == null) return;
+      const id = String(item.id);
+      const prev = map.get(id);
+      if (!prev || stamp(item) >= stamp(prev)) map.set(id, item);
+    });
+    const out = Array.from(map.values());
+    out.sort((x, y) => stamp(y).localeCompare(stamp(x)));
+    return out;
   }
 
+  function normalizeList(value, fallback) {
+    if (Array.isArray(value)) return value;
+    return Array.isArray(fallback) ? fallback.slice() : [];
+  }
+
+  /**
+   * Dual-read: localStorage + ~/.config/docs-term via /api/config.
+   * Re-reads localStorage after the network round-trip so a save during boot
+   * is not clobbered by a stale pre-await snapshot.
+   */
+  async function loadStore(name, lsKey, fallback) {
+    const remote = await configGet(name);
+    const local = lsGet(lsKey, null);
+    if (Array.isArray(remote) || Array.isArray(local)) {
+      return mergeByIdNewest(normalizeList(local, []), normalizeList(remote, []));
+    }
+    if (remote != null) return remote;
+    if (local != null) return local;
+    return fallback;
+  }
+
+  let storeWriteGen = 0;
+
   async function persistStore(name, lsKey, data) {
+    storeWriteGen += 1;
     lsSet(lsKey, data);
     await configPut(name, data);
   }
@@ -1105,20 +1134,52 @@
   }
 
   /* ----- Named sessions ----- */
-  async function saveCurrentSession(promptName) {
-    let name = docTitle();
-    if (promptName) {
-      const entered = window.prompt('Session name', name);
-      if (entered == null) return;
-      name = entered.trim() || name;
-      document.getElementById('doc-title').value = name;
-      document.title = name + ' - Google Docs';
+  function fillSessionForm(name, cwd) {
+    const nameEl = document.getElementById('session-name');
+    const cwdEl = document.getElementById('session-cwd');
+    if (nameEl) nameEl.value = name != null ? name : docTitle();
+    if (cwdEl) cwdEl.value = cwd != null ? cwd : (state.cwd || '');
+  }
+
+  /**
+   * Save current terminal scrollback as a named session.
+   * opts: { name, cwd, prompt } — prefer explicit name/cwd (modal form).
+   * Avoids window.prompt when name/cwd are provided (prompt is blocked in many automation browsers).
+   */
+  async function saveCurrentSession(opts) {
+    if (opts === true) opts = { prompt: true };
+    opts = opts || {};
+    let name = (opts.name != null ? String(opts.name) : docTitle()).trim();
+    if (opts.prompt) {
+      const entered = window.prompt('Session name', name || 'Untitled document');
+      if (entered == null) return null;
+      name = entered.trim() || name || 'Untitled document';
     }
-    const cwd =
-      state.cwd ||
-      (window.prompt('Working directory to restore (optional)', state.cwd || '') || '');
+    if (!name) name = 'Untitled document';
+    document.getElementById('doc-title').value = name;
+    document.title = name + ' - Google Docs';
+
+    let cwd = opts.cwd != null ? String(opts.cwd) : (state.cwd || '');
+    if (opts.prompt && opts.cwd == null && !cwd) {
+      const enteredCwd = window.prompt('Working directory to restore (optional)', state.cwd || '');
+      if (enteredCwd == null) {
+        /* cancel cwd → still save with empty cwd */
+        cwd = '';
+      } else {
+        cwd = String(enteredCwd);
+      }
+    }
     state.cwd = cwd;
-    const scrollback = getTranscript();
+
+    let scrollback = '';
+    try {
+      scrollback = getTranscript();
+    } catch (err) {
+      snack('Could not read terminal buffer');
+      console.error(err);
+      return null;
+    }
+
     const existing = state.sessionId ? sessions.find((s) => s.id === state.sessionId) : null;
     const entry = {
       id: existing ? existing.id : uid(),
@@ -1131,10 +1192,24 @@
     sessions = sessions.filter((s) => s.id !== entry.id);
     sessions.unshift(entry);
     if (sessions.length > 40) sessions = sessions.slice(0, 40);
-    await persistStore('sessions', LS.sessions, sessions);
-    savePrefs();
-    snack('Session saved: ' + name);
+
+    // Paint list before awaiting disk so Save never looks like a no-op.
+    fillSessionForm(name, cwd);
     renderSessionsList();
+    savePrefs();
+    await persistStore('sessions', LS.sessions, sessions);
+    // Re-render in case bootStores merged while we awaited.
+    renderSessionsList();
+    snack('Session saved: ' + name);
+    return entry;
+  }
+
+  function saveSessionFromForm() {
+    const nameEl = document.getElementById('session-name');
+    const cwdEl = document.getElementById('session-cwd');
+    const name = (nameEl && nameEl.value.trim()) || docTitle();
+    const cwd = cwdEl ? cwdEl.value.trim() : (state.cwd || '');
+    return saveCurrentSession({ name: name, cwd: cwd });
   }
 
   async function restoreSession(id) {
@@ -1195,10 +1270,20 @@
     });
   }
 
-  function openSessionsModal() {
+  function openSessionsModal(opts) {
+    opts = opts || {};
     hideMenus();
+    fillSessionForm(opts.name, opts.cwd);
     renderSessionsList();
-    document.getElementById('sessions-modal').classList.add('show');
+    const modal = document.getElementById('sessions-modal');
+    modal.classList.add('show');
+    const nameEl = document.getElementById('session-name');
+    if (opts.focusSave && nameEl) {
+      setTimeout(() => {
+        nameEl.focus();
+        nameEl.select();
+      }, 0);
+    }
   }
 
   function renameSession() {
@@ -1884,8 +1969,7 @@
         openSessionsModal();
         return;
       case 'save-session':
-        hideMenus();
-        saveCurrentSession(true);
+        openSessionsModal({ focusSave: true });
         return;
       case 'rename-session':
         hideMenus();
@@ -2124,7 +2208,18 @@
   });
 
   document.getElementById('sessions-done').addEventListener('click', () => hideModal('sessions-modal'));
-  document.getElementById('sessions-save').addEventListener('click', () => saveCurrentSession(true));
+  document.getElementById('sessions-save').addEventListener('click', () => {
+    saveSessionFromForm();
+  });
+  const sessionNameInput = document.getElementById('session-name');
+  if (sessionNameInput) {
+    sessionNameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        saveSessionFromForm();
+      }
+    });
+  }
   document.getElementById('sessions-modal').addEventListener('click', (e) => {
     if (e.target.id === 'sessions-modal') hideModal('sessions-modal');
   });
@@ -2208,7 +2303,7 @@
       window.open(location.href, '_blank');
     } else if (meta && (e.key === 's' || e.key === 'S') && !inField) {
       e.preventDefault();
-      saveCurrentSession(true);
+      openSessionsModal({ focusSave: true });
     } else if (meta && e.altKey && (e.key === 'm' || e.key === 'M')) {
       e.preventDefault();
       openCommentModal();
@@ -2253,14 +2348,28 @@
   initPageResizeHandles();
 
   (async function bootStores() {
-    sessions = (await loadStore('sessions', LS.sessions, [])) || [];
-    bookmarks = (await loadStore('bookmarks', LS.bookmarks, [])) || [];
-    comments = (await loadStore('comments', LS.comments, [])) || [];
-    sshProfiles = (await loadStore('ssh-profiles', LS.ssh, [])) || [];
+    const genAtStart = storeWriteGen;
+    const loadedSessions = await loadStore('sessions', LS.sessions, []);
+    const loadedBookmarks = await loadStore('bookmarks', LS.bookmarks, []);
+    const loadedComments = await loadStore('comments', LS.comments, []);
+    const loadedSsh = await loadStore('ssh-profiles', LS.ssh, []);
+    // If the user saved during boot, merge — do not wipe in-memory writes.
+    if (storeWriteGen === genAtStart) {
+      sessions = normalizeList(loadedSessions, []);
+      bookmarks = normalizeList(loadedBookmarks, []);
+      comments = normalizeList(loadedComments, []);
+      sshProfiles = normalizeList(loadedSsh, []);
+    } else {
+      sessions = mergeByIdNewest(sessions, normalizeList(loadedSessions, []));
+      bookmarks = mergeByIdNewest(bookmarks, normalizeList(loadedBookmarks, []));
+      comments = mergeByIdNewest(comments, normalizeList(loadedComments, []));
+      sshProfiles = mergeByIdNewest(sshProfiles, normalizeList(loadedSsh, []));
+    }
     if (!Array.isArray(sessions)) sessions = [];
     if (!Array.isArray(bookmarks)) bookmarks = [];
     if (!Array.isArray(comments)) comments = [];
     if (!Array.isArray(sshProfiles)) sshProfiles = [];
+    renderSessionsList();
     // Merge disk prefs if present (layout / dark chrome) without wiping localStorage wins on conflict:
     // prefer localStorage already loaded; fill only missing keys from disk.
     try {
