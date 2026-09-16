@@ -44,7 +44,13 @@ function configPath(name) {
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '8mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders(res, filePath) {
+    if (/\.(html|js|css)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-store');
+    }
+  },
+}));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, shell: SHELL, sessions, configDir: CONFIG_DIR });
