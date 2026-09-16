@@ -204,6 +204,7 @@
   <button class="mi" type="button" data-action="rename-session"><span class="label">Rename</span></button>
   <div class="sep"></div>
   <button class="mi" type="button" data-action="page-setup"><span class="label">Page setup</span></button>
+  <button class="mi" type="button" data-action="scrolling"><span class="label">Scrolling</span></button>
   <button class="mi" type="button" data-action="print"><span class="label">Print</span><span class="kbd">Ctrl+P</span></button>
   <div class="sep"></div>
   <button class="mi" type="button" data-action="close"><span class="label">Close</span></button>
@@ -279,8 +280,8 @@
   <button class="mi" type="button" data-action="manage-bookmarks"><span class="label">Command bookmarks…</span></button>
   <button class="mi" type="button" data-action="open-connection"><span class="label">SSH profiles…</span></button>
   <div class="sep"></div>
-  <button class="mi" type="button" data-action="settings"><span class="label">Settings</span></button>
   <button class="mi" type="button" data-action="page-setup"><span class="label">Page setup</span></button>
+  <button class="mi" type="button" data-action="scrolling"><span class="label">Scrolling</span></button>
   <button class="mi disabled" type="button"><span class="label">Accessibility</span></button>
 </div>
 
@@ -518,17 +519,16 @@
 </div>
 
 
-<div class="modal-back" id="settings-modal">
-  <div class="dialog wide-dialog" role="dialog" aria-labelledby="settings-title">
-    <h2 id="settings-title">Settings</h2>
-    <p class="find-note">Layout and chrome prefs sync to <code>localStorage</code> and <code>~/.config/docs-term/prefs.json</code>.</p>
+<div class="modal-back" id="page-setup-modal">
+  <div class="dialog wide-dialog" role="dialog" aria-labelledby="page-setup-title">
+    <h2 id="page-setup-title">Page setup</h2>
+    <p class="find-note">Page size and margins sync to <code>localStorage</code> and <code>~/.config/docs-term/prefs.json</code>.</p>
 
     <h3 class="settings-h">Page layout</h3>
     <div class="settings-row settings-edit-row">
-      <button type="button" class="btn-filled" id="settings-layout-edit">Edit</button>
-      <label class="settings-check"><input type="checkbox" id="settings-layout-mode"> Layout edit mode (drag page edges + margins)</label>
+      <button type="button" class="btn-filled btn-edit" id="settings-layout-edit">Edit</button>
     </div>
-    <p class="find-note" id="settings-layout-hint">With Edit on, drag blue page edges (size) and dashed margin guides on the canvas. Numeric fields stay in sync.</p>
+    <p class="find-note" id="settings-layout-hint">Press <strong>Edit</strong> to drag page edges and margin guides. Press again (or Done editing) to finish. Numeric fields stay in sync.</p>
     <div class="settings-row">
       <label class="settings-check"><input type="checkbox" id="settings-pageless"> Pageless (continuous scroll — no page breaks / forced page height)</label>
     </div>
@@ -540,6 +540,18 @@
       <label>Margin left (px)<input class="share-field" id="settings-margin-left" type="number" min="0" max="240" step="4"></label>
       <label>Margin right (px)<input class="share-field" id="settings-margin-right" type="number" min="0" max="240" step="4"></label>
     </div>
+
+    <div class="dialog-actions">
+      <button class="btn-text" type="button" id="settings-reset-layout">Reset layout</button>
+      <button class="btn-filled" type="button" id="page-setup-done">Done</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-back" id="scrolling-modal">
+  <div class="dialog wide-dialog" role="dialog" aria-labelledby="scrolling-title">
+    <h2 id="scrolling-title">Scrolling</h2>
+    <p class="find-note">Follow PTY output and history prefs sync to <code>localStorage</code> and <code>~/.config/docs-term/prefs.json</code>.</p>
 
     <h3 class="settings-h">Scrolling</h3>
     <div class="settings-row">
@@ -554,17 +566,8 @@
       <label class="settings-check"><input type="checkbox" id="settings-smooth-scroll"> Smooth scroll</label>
     </div>
 
-    <h3 class="settings-h">Appearance</h3>
-    <div class="settings-row">
-      <label class="settings-check"><input type="checkbox" id="settings-dark"> Dark mode (Docs chrome)</label>
-    </div>
-    <div class="settings-row">
-      <label class="settings-check"><input type="checkbox" id="settings-no-bg"> No cell backgrounds (Highlight+)</label>
-    </div>
-
     <div class="dialog-actions">
-      <button class="btn-text" type="button" id="settings-reset-layout">Reset layout</button>
-      <button class="btn-filled" type="button" id="settings-done">Done</button>
+      <button class="btn-filled" type="button" id="scrolling-done">Done</button>
     </div>
   </div>
 </div>

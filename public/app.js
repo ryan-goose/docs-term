@@ -676,8 +676,11 @@
     const btn = document.getElementById('settings-layout-edit');
     if (!btn) return;
     btn.textContent = state.layoutEdit ? 'Done editing' : 'Edit';
-    btn.classList.toggle('btn-filled', !state.layoutEdit);
-    btn.classList.toggle('btn-text', state.layoutEdit);
+    // Edit is always a blue button (no checkbox); pressed state via is-on
+    btn.classList.add('btn-edit', 'btn-filled');
+    btn.classList.remove('btn-text');
+    btn.classList.toggle('is-on', !!state.layoutEdit);
+    btn.setAttribute('aria-pressed', state.layoutEdit ? 'true' : 'false');
   }
 
   function applyPageLayout() {
@@ -704,8 +707,6 @@
   function setLayoutEdit(on) {
     state.layoutEdit = !!on;
     document.body.classList.toggle('layout-edit', state.layoutEdit);
-    const cb = document.getElementById('settings-layout-mode');
-    if (cb) cb.checked = state.layoutEdit;
     syncLayoutEditButton();
     savePrefs();
   }
@@ -773,7 +774,6 @@
     document.getElementById('settings-margin-bottom').value = String(state.marginBottom);
     document.getElementById('settings-margin-left').value = String(state.marginLeft);
     document.getElementById('settings-margin-right').value = String(state.marginRight);
-    document.getElementById('settings-layout-mode').checked = state.layoutEdit;
     const pageless = document.getElementById('settings-pageless');
     if (pageless) pageless.checked = state.pageless;
     const follow = document.getElementById('settings-follow-output');
@@ -804,7 +804,7 @@
     state.marginLeft = num('settings-margin-left', state.marginLeft, 0, 240);
     state.marginRight = num('settings-margin-right', state.marginRight, 0, 240);
     applyPageLayout();
-    setLayoutEdit(document.getElementById('settings-layout-mode').checked);
+    // layoutEdit is toggled only by the Edit button (not a form checkbox)
     const pagelessEl = document.getElementById('settings-pageless');
     if (pagelessEl) setPageless(pagelessEl.checked);
     const followEl = document.getElementById('settings-follow-output');
@@ -818,16 +818,77 @@
     else savePrefs();
   }
 
-  function openSettings() {
-    hideMenus();
+  function fillPageSetupForm() {
     fillSettingsForm();
-    document.getElementById('settings-modal').classList.add('show');
   }
 
-  function closeSettings(apply) {
-    if (apply) readSettingsForm();
-    hideModal('settings-modal');
+  function readPageSetupForm() {
+    // Only layout fields — do not clobber scrolling prefs from the other dialog
+    const num = (id, fallback, min, max) => {
+      const el = document.getElementById(id);
+      if (!el) return fallback;
+      const v = Number(el.value);
+      if (!Number.isFinite(v)) return fallback;
+      return Math.max(min, Math.min(max, v));
+    };
+    state.pageWidth = num('settings-page-width', state.pageWidth, 480, 1600);
+    state.pageHeight = num('settings-page-height', state.pageHeight, 480, 2400);
+    state.marginTop = num('settings-margin-top', state.marginTop, 0, 240);
+    state.marginBottom = num('settings-margin-bottom', state.marginBottom, 0, 240);
+    state.marginLeft = num('settings-margin-left', state.marginLeft, 0, 240);
+    state.marginRight = num('settings-margin-right', state.marginRight, 0, 240);
+    applyPageLayout();
+    const pagelessEl = document.getElementById('settings-pageless');
+    if (pagelessEl) setPageless(pagelessEl.checked);
+    savePrefs();
   }
+
+  function fillScrollingForm() {
+    const follow = document.getElementById('settings-follow-output');
+    if (follow) follow.checked = state.followOutput;
+    const smooth = document.getElementById('settings-smooth-scroll');
+    if (smooth) smooth.checked = state.smoothScroll;
+    const sb = document.getElementById('settings-scrollback');
+    const sbr = document.getElementById('settings-scrollback-range');
+    if (sb) sb.value = String(state.scrollbackLines);
+    if (sbr) sbr.value = String(state.scrollbackLines);
+  }
+
+  function readScrollingForm() {
+    const followEl = document.getElementById('settings-follow-output');
+    if (followEl) setFollowOutput(followEl.checked);
+    const smoothEl = document.getElementById('settings-smooth-scroll');
+    if (smoothEl) setSmoothScroll(smoothEl.checked);
+    const sb = document.getElementById('settings-scrollback');
+    if (sb) setScrollbackLines(sb.value);
+    else savePrefs();
+  }
+
+  function openPageSetup() {
+    hideMenus();
+    fillPageSetupForm();
+    document.getElementById('page-setup-modal').classList.add('show');
+  }
+
+  function closePageSetup(apply) {
+    if (apply) readPageSetupForm();
+    hideModal('page-setup-modal');
+  }
+
+  function openScrolling() {
+    hideMenus();
+    fillScrollingForm();
+    document.getElementById('scrolling-modal').classList.add('show');
+  }
+
+  function closeScrolling(apply) {
+    if (apply) readScrollingForm();
+    hideModal('scrolling-modal');
+  }
+
+  // Back-compat aliases (old Settings action / any leftover refs)
+  function openSettings() { openPageSetup(); }
+  function closeSettings(apply) { closePageSetup(apply); }
 
   function resetLayoutDefaults() {
     state.pageWidth = DEFAULT_LAYOUT.pageWidth;
@@ -2263,7 +2324,10 @@
         return;
       case 'settings':
       case 'page-setup':
-        openSettings();
+        openPageSetup();
+        return;
+      case 'scrolling':
+        openScrolling();
         return;
       case 'toggle-dark':
         setDarkChrome(!state.darkChrome);
@@ -2398,18 +2462,15 @@
     if (e.target.id === 'paste-modal') closePasteSuggestion();
   });
 
-  document.getElementById('settings-done').addEventListener('click', () => closeSettings(true));
+  document.getElementById('page-setup-done').addEventListener('click', () => closePageSetup(true));
+  document.getElementById('scrolling-done').addEventListener('click', () => closeScrolling(true));
   document.getElementById('settings-reset-layout').addEventListener('click', () => resetLayoutDefaults());
-  document.getElementById('settings-layout-mode').addEventListener('change', (e) => {
-    setLayoutEdit(e.target.checked);
-  });
   const layoutEditBtn = document.getElementById('settings-layout-edit');
   if (layoutEditBtn) {
     layoutEditBtn.addEventListener('click', () => {
       setLayoutEdit(!state.layoutEdit);
       if (state.layoutEdit) {
-        snack('Drag page edges and margin guides');
-        // Keep settings open so numeric fields stay visible while editing
+        snack('Drag page edges and margin guides — press Edit again when done');
       }
     });
   }
@@ -2450,8 +2511,11 @@
       });
     }
   });
-  document.getElementById('settings-modal').addEventListener('click', (e) => {
-    if (e.target.id === 'settings-modal') closeSettings(true);
+  document.getElementById('page-setup-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'page-setup-modal') closePageSetup(true);
+  });
+  document.getElementById('scrolling-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'scrolling-modal') closeScrolling(true);
   });
 
   document.getElementById('sessions-done').addEventListener('click', () => hideModal('sessions-modal'));
@@ -2508,7 +2572,8 @@
       'ssh-modal',
       'bookmarks-modal',
       'comment-modal',
-      'settings-modal',
+      'page-setup-modal',
+      'scrolling-modal',
     ].forEach(hideModal);
     pendingPasteLines = [];
     pasteCursor = 0;

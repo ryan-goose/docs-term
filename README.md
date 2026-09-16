@@ -75,13 +75,14 @@ Prefs (theme, no-bg, dark chrome, page width/height/margins, layout-edit, pagele
 ## New: paste suggestions, page layout, dark chrome
 
 - **Multiline paste → suggestion mode** (default): queued lines with Confirm / Skip / Confirm all / Cancel; Confirm all walks remaining lines sequentially. Single-line paste is unchanged.
-- **Settings / Page setup**: **Edit** turns on drag mode for page edges (width/height) and margin guides; numeric fields stay in sync; persisted.
+- **Page setup** (File / Tools → Page setup): **Edit** is a blue toggle button (no checkbox) that turns on drag mode for page edges and margin guides; numeric fields stay in sync; persisted. Pageless lives here too.
+- **Scrolling** (File / Tools → Scrolling): follow PTY output, scrollback size, optional smooth scroll — separate from Page setup.
 - **Dark mode**: Docs-like dark chrome for bars, menus, canvas, and side panels (orthogonal to terminal Highlight+ themes).
 
 ## New: pageless + scrolling
 
-- **Pageless**: Docs-style continuous scroll — no forced letter page height / page breaks (`body.pageless`). Toggle in Settings / Page setup; persisted.
-- **Scrolling**: follow PTY output (auto-stick to bottom unless you scroll up), scrollback history size (lines, default 5000), optional smooth scroll. Follow is wired into the live `term.write` / PTY path.
+- **Pageless**: Docs-style continuous scroll — no forced letter page height / page breaks (`body.pageless`). Toggle in Page setup; persisted.
+- **Scrolling**: File / Tools → Scrolling — follow PTY output (auto-stick to bottom unless you scroll up), scrollback history size (lines, default 5000), optional smooth scroll. Follow is wired into the live `term.write` / PTY path.
 
 ## Features
 
@@ -95,7 +96,7 @@ Prefs (theme, no-bg, dark chrome, page width/height/margins, layout-edit, pagele
 | 8 | **SSH profile picker** | File → Open connection…; writes `ssh user@host` into the PTY; profiles local only (no secrets in git) |
 | 10 | **Export PDF / .docx** | File → Export as PDF… / Export as .docx… (client-side) |
 | 11 | **Smart paste / suggestion mode** | Multiline paste opens a Docs-like queue: **Confirm / Skip / Confirm all / Cancel**; each Confirm sends one line + newline via **bracketed paste**. Single-line paste stays immediate. |
-| 12 | **Page layout / Settings** | Tools → Settings or File → Page setup: **Edit** drag mode (page edges + margin guides), page width/height, margins, **pageless**, follow-output / scrollback / smooth scroll; prefs in `localStorage` + `~/.config/docs-term/prefs.json` |
+| 12 | **Page setup / Scrolling** | File or Tools → **Page setup** (Edit blue toggle for drag edges/margins, width/margins, pageless) and **Scrolling** (follow output, scrollback, smooth scroll); prefs in `localStorage` + `~/.config/docs-term/prefs.json` |
 | 13 | **Dark chrome** | View → Dark mode (also Highlight+ / Settings): full Google Docs–style dark UI (top bar, menus, canvas, side panels). Terminal themes + no-cell-bg still apply to the page surface. |
 | 17 | **Keyboard cheat-sheet** | Help → Keyboard shortcuts (`Ctrl/Cmd+/`) |
 | 20 | **Artix .desktop launcher** | `packaging/docs-term.desktop` → install with `scripts/install-desktop.sh` |
@@ -104,12 +105,12 @@ Prefs (theme, no-bg, dark chrome, page width/height/margins, layout-edit, pagele
 
 | Menu | Wired actions |
 | --- | --- |
-| **File** | New tab, New session, Open connection (SSH), Named sessions, Save session, Share, Download .txt, Export PDF/.docx, Rename, Page setup, Print, Close |
+| **File** | New tab, New session, Open connection (SSH), Named sessions, Save session, Share, Download .txt, Export PDF/.docx, Rename, Page setup, Scrolling, Print, Close |
 | **Edit** | Undo/Redo, Cut/Copy/Paste (smart), Select all, Find and replace, Bookmark last command |
 | **View** | Ruler, chrome, Full screen, Zoom, font size, Outline, Comments, Dark mode, Terminal appearance |
 | **Insert** | New line, Clear screen, Form feed, Comment, Bookmarks |
 | **Format** | Text / Size / Text color / Highlight, Clear formatting |
-| **Tools / Help** | About, Shortcuts, Terminal appearance, Bookmarks, SSH profiles, Settings / Page setup |
+| **Tools / Help** | About, Shortcuts, Terminal appearance, Bookmarks, SSH profiles, Page setup, Scrolling |
 
 Unavailable Docs chrome items remain disabled or show a snackbar.
 

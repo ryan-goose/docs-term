@@ -1148,3 +1148,22 @@ body.dark-chrome .tb-size {
 body.dark-chrome .tb-sep { background: var(--docs-hairline); }
 body.dark-chrome .conn-pill.warn { color: #f28b82; }
 /* Keep terminal page surface from theme; chrome/canvas/panels use dark vars */
+
+
+/* Edit (layout drag) — always blue toggle button */
+.btn-edit,
+.btn-edit.btn-filled,
+.btn-edit.btn-text {
+  background: var(--docs-blue);
+  color: #fff;
+  border-color: transparent;
+}
+.btn-edit:hover,
+.btn-edit.btn-filled:hover,
+.btn-edit.btn-text:hover {
+  background: var(--docs-blue-hover);
+  color: #fff;
+}
+.btn-edit.is-on {
+  box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--docs-blue);
+}
