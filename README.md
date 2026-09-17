@@ -83,6 +83,7 @@ Prefs (theme, no-bg, dark chrome, page width/height/margins, layout-edit, pagele
 
 - **Pageless**: Docs-style continuous scroll — no forced letter page height / page breaks (`body.pageless`). Toggle in Page setup; persisted.
 - **Scrolling**: File / Tools → Scrolling — follow PTY output (auto-stick to bottom unless you scroll up), scrollback history size (lines, default 5000), optional smooth scroll. Follow is wired into the live `term.write` / PTY path.
+- **Single outer scrollbar**: xterm’s inner `.xterm-viewport` scrollbar is hidden; the Docs `.canvas` scroller is the only visible scrollbar. A `#scroll-proxy` sizes the outer scroll range to scrollback (page sticks while scrubbing); Follow PTY / scrollback prefs stay synced to that outer scroller.
 
 ## Features
 

@@ -379,6 +379,18 @@ button, input { font-family: inherit; }
   background: var(--docs-canvas);
   overflow: auto;
   position: relative;
+  overflow-anchor: none; /* keep outer scroll stable as scroll-proxy grows */
+}
+
+/* Proxy creates the outer scroll range (synced to xterm scrollback). */
+#scroll-proxy {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
 }
 
 .page {
@@ -391,8 +403,13 @@ button, input { font-family: inherit; }
   background: #fff;
   box-shadow: var(--docs-page-shadow);
   position: relative;
+  top: 8px; /* used when JS switches to sticky during scrollback */
+  z-index: 1;
   display: flex;
   flex-direction: column;
+}
+.page.is-scroll-sticky {
+  position: sticky;
 }
 
 /* Docs-style continuous scroll: no forced letter page height */
@@ -400,6 +417,7 @@ body.pageless .page {
   min-height: 0;
   height: calc(100% - 16px);
   margin: 8px auto 8px;
+  top: 8px;
   box-shadow: 0 0 0 1px rgba(60, 64, 67, 0.08), var(--docs-page-shadow);
 }
 body.pageless .page-resize-top,
@@ -423,7 +441,17 @@ body.pageless .page-resize-bottom {
 
 /* xterm on a white Docs page */
 .xterm { height: 100%; width: 100%; }
-.xterm-viewport { background-color: transparent !important; }
+.xterm-viewport {
+  background-color: transparent !important;
+  /* Keep overflow scroll for xterm internals; hide the inner scrollbar chrome */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.xterm-viewport::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
 .xterm-screen { background-color: transparent !important; }
 
 .page-status {
@@ -1029,7 +1057,6 @@ body.layout-dragging { user-select: none; }
 body.layout-dragging.layout-drag-ew { cursor: ew-resize; }
 body.layout-dragging.layout-drag-ns { cursor: ns-resize; }
 
-body.smooth-scroll .xterm-viewport,
 body.smooth-scroll .canvas {
   scroll-behavior: smooth;
 }

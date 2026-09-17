@@ -396,6 +396,24 @@
   window.__docsTermStripBg = stripCellBackgrounds;
 
   let stickToBottom = true;
+  let scrollSyncLock = false;
+  let syncFromOuter = false;
+
+  function getCellHeight() {
+    try {
+      const core = term._core;
+      const d = core && core._renderService && core._renderService.dimensions;
+      if (d && d.css && d.css.cell && d.css.cell.height) return d.css.cell.height;
+    } catch (_) {}
+    try {
+      const screen = term.element && term.element.querySelector('.xterm-screen');
+      if (screen && term.rows) {
+        const h = screen.clientHeight / term.rows;
+        if (h > 0) return h;
+      }
+    } catch (_) {}
+    return Math.max(12, Math.ceil((state.fontSize || 14) * 1.25));
+  }
 
   function isViewportAtBottom() {
     try {
@@ -406,6 +424,141 @@
     }
   }
 
+  function isOuterAtBottom() {
+    const canvas = document.getElementById('canvas');
+    if (!canvas) return true;
+    return canvas.scrollTop + canvas.clientHeight >= canvas.scrollHeight - 6;
+  }
+
+  function canvasOuterPad() {
+    return state.pageless ? 16 : 24;
+  }
+
+  function pageOverflowPx() {
+    const canvas = document.getElementById('canvas');
+    const page = document.getElementById('page');
+    if (!canvas || !page) return 0;
+    return Math.max(0, page.offsetHeight + canvasOuterPad() - canvas.clientHeight);
+  }
+
+  function updateOuterScrollMetrics() {
+    const proxy = document.getElementById('scroll-proxy');
+    const canvas = document.getElementById('canvas');
+    const page = document.getElementById('page');
+    if (!proxy || !canvas) return;
+    const rh = getCellHeight();
+    let baseY = 0;
+    try {
+      baseY = term.buffer.active.baseY;
+    } catch (_) {}
+    const viewH = canvas.clientHeight || 0;
+    const pageH = page ? page.offsetHeight : 0;
+    const contentH = Math.max(viewH, pageH + canvasOuterPad());
+    const prevTop = canvas.scrollTop;
+    // contentH covers letter-page overflow; + baseY*rh is the xterm scrollback range.
+    proxy.style.height = contentH + Math.max(0, baseY) * rh + 'px';
+    if (page) {
+      // Stick the Docs page while scrubbing scrollback so the terminal stays on-screen.
+      page.classList.toggle('is-scroll-sticky', baseY > 0);
+    }
+    // Preserve scrub position when proxy grows (unless Follow is actively sticking).
+    if (!scrollSyncLock && !(stickToBottom && state.followOutput)) {
+      scrollSyncLock = true;
+      try {
+        canvas.scrollTop = prevTop;
+      } finally {
+        scrollSyncLock = false;
+      }
+    }
+  }
+
+  function syncOuterFromTerm() {
+    if (scrollSyncLock || syncFromOuter) return;
+    const canvas = document.getElementById('canvas');
+    if (!canvas) return;
+    let baseY = 0;
+    let viewportY = 0;
+    try {
+      baseY = term.buffer.active.baseY;
+      viewportY = term.buffer.active.viewportY;
+    } catch (_) {
+      return;
+    }
+    stickToBottom = viewportY >= baseY;
+    const rh = getCellHeight();
+    const overflow = pageOverflowPx();
+    const target = overflow + Math.max(0, viewportY) * rh;
+    // Keep letter-page scrubbing (above the buffer range) when viewing the top of history.
+    if (viewportY <= 0 && canvas.scrollTop < overflow - 1) {
+      return;
+    }
+    scrollSyncLock = true;
+    try {
+      canvas.scrollTop = target;
+    } finally {
+      scrollSyncLock = false;
+    }
+  }
+
+  function syncTermFromOuter() {
+    if (scrollSyncLock) return;
+    const canvas = document.getElementById('canvas');
+    if (!canvas) return;
+    if (!isOuterAtBottom()) stickToBottom = false;
+    const rh = getCellHeight();
+    if (!(rh > 0)) return;
+    let baseY = 0;
+    try {
+      baseY = term.buffer.active.baseY;
+    } catch (_) {
+      return;
+    }
+    const overflow = pageOverflowPx();
+    const bufferScroll = Math.max(0, canvas.scrollTop - overflow);
+    const line = Math.max(0, Math.min(baseY, Math.round(bufferScroll / rh)));
+    scrollSyncLock = true;
+    syncFromOuter = true;
+    try {
+      term.scrollToLine(line);
+    } catch (_) {
+    } finally {
+      syncFromOuter = false;
+      scrollSyncLock = false;
+    }
+    try {
+      const atTermBottom = term.buffer.active.viewportY >= term.buffer.active.baseY;
+      const overflow = pageOverflowPx();
+      const atOuterBufferBottom =
+        canvas.scrollTop + canvas.clientHeight >= canvas.scrollHeight - 6 ||
+        canvas.scrollTop >= overflow + baseY * rh - 6;
+      stickToBottom = atTermBottom && atOuterBufferBottom;
+    } catch (_) {
+      stickToBottom = isOuterAtBottom();
+    }
+  }
+
+  function followScrollToBottom() {
+    try {
+      term.scrollToBottom();
+    } catch (_) {}
+    updateOuterScrollMetrics();
+    const canvas = document.getElementById('canvas');
+    const rh = getCellHeight();
+    let baseY = 0;
+    try {
+      baseY = term.buffer.active.baseY;
+    } catch (_) {}
+    if (canvas) {
+      scrollSyncLock = true;
+      try {
+        canvas.scrollTop = pageOverflowPx() + Math.max(0, baseY) * rh;
+      } finally {
+        scrollSyncLock = false;
+      }
+    }
+    stickToBottom = true;
+  }
+
   function writeToTerm(data) {
     if (state.noCellBg) data = stripCellBackgrounds(data);
     if (!state.followOutput) {
@@ -414,17 +567,18 @@
         y = term.buffer.active.viewportY;
       } catch (_) {}
       term.write(data, () => {
+        updateOuterScrollMetrics();
         try {
           term.scrollToLine(y);
         } catch (_) {}
+        syncOuterFromTerm();
       });
       return;
     }
     term.write(data, () => {
+      updateOuterScrollMetrics();
       if (stickToBottom) {
-        try {
-          term.scrollToBottom();
-        } catch (_) {}
+        followScrollToBottom();
       }
     });
   }
@@ -455,6 +609,8 @@
   try {
     term.onScroll(() => {
       stickToBottom = isViewportAtBottom();
+      updateOuterScrollMetrics();
+      syncOuterFromTerm();
     });
   } catch (_) {}
 
@@ -482,6 +638,12 @@
     try {
       fitAddon.fit();
     } catch (_) {}
+    updateOuterScrollMetrics();
+    if (stickToBottom && state.followOutput) {
+      followScrollToBottom();
+    } else {
+      syncOuterFromTerm();
+    }
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
     }
@@ -726,7 +888,10 @@
     state.followOutput = !!on;
     const cb = document.getElementById('settings-follow-output');
     if (cb) cb.checked = state.followOutput;
-    if (state.followOutput) stickToBottom = isViewportAtBottom();
+    if (state.followOutput) {
+      stickToBottom = isViewportAtBottom() || isOuterAtBottom();
+      if (stickToBottom) followScrollToBottom();
+    }
     savePrefs();
   }
 
@@ -749,6 +914,9 @@
     const rangeEl = document.getElementById('settings-scrollback-range');
     if (numEl && opts.syncForm !== false) numEl.value = String(next);
     if (rangeEl && opts.syncForm !== false) rangeEl.value = String(next);
+    try {
+      updateOuterScrollMetrics();
+    } catch (_) {}
     if (!opts.skipSave) savePrefs();
   }
 
@@ -2659,7 +2827,22 @@
 
   window.addEventListener('resize', () => sendResize());
   if (window.ResizeObserver) {
-    new ResizeObserver(() => sendResize()).observe(document.getElementById('terminal'));
+    const canvasEl = document.getElementById('canvas');
+    if (canvasEl) new ResizeObserver(() => sendResize()).observe(canvasEl);
+  }
+
+  const canvasScrollEl = document.getElementById('canvas');
+  if (canvasScrollEl) {
+    canvasScrollEl.addEventListener(
+      'scroll',
+      () => {
+        if (scrollSyncLock) return;
+        // User moved the Docs scroller — drop Follow until they return to bottom.
+        if (!isOuterAtBottom()) stickToBottom = false;
+        syncTermFromOuter();
+      },
+      { passive: true }
+    );
   }
 
   // Restore prefs into UI
