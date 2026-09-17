@@ -439,18 +439,36 @@ body.pageless .page-resize-bottom {
   height: 100%;
 }
 
-/* xterm on a white Docs page */
+/* xterm on a white Docs page — single outer Docs canvas scroller only */
 .xterm { height: 100%; width: 100%; }
 .xterm-viewport {
   background-color: transparent !important;
-  /* Keep overflow scroll for xterm internals; hide the inner scrollbar chrome */
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  /* Keep overflow-y scroll for xterm internals; hide native scrollbar chrome */
+  overflow-y: scroll !important;
+  scrollbar-width: none !important; /* Firefox */
+  -ms-overflow-style: none !important; /* legacy Edge */
 }
-.xterm-viewport::-webkit-scrollbar {
+.xterm .xterm-viewport::-webkit-scrollbar,
+.xterm .xterm-viewport::-webkit-scrollbar-thumb,
+.xterm .xterm-viewport::-webkit-scrollbar-track,
+.xterm-viewport::-webkit-scrollbar,
+.xterm-viewport::-webkit-scrollbar-thumb,
+.xterm-viewport::-webkit-scrollbar-track {
   width: 0 !important;
   height: 0 !important;
   display: none !important;
+  background: transparent !important;
+}
+/* xterm.js also draws a custom overlay scrollbar (not ::-webkit-scrollbar) */
+.xterm .xterm-scrollable-element > .scrollbar,
+.xterm .xterm-scrollable-element > .scrollbar.visible,
+.xterm .xterm-scrollable-element > .scrollbar.invisible,
+.xterm .xterm-scrollable-element > .shadow {
+  display: none !important;
+  width: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
 }
 .xterm-screen { background-color: transparent !important; }
 
