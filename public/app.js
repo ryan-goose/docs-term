@@ -2524,12 +2524,14 @@
     });
     sbRange.addEventListener('change', () => setScrollbackLines(sbRange.value));
   }
-  document.getElementById('settings-dark').addEventListener('change', (e) => {
-    setDarkChrome(e.target.checked);
-  });
-  document.getElementById('settings-no-bg').addEventListener('change', (e) => {
-    setNoCellBg(e.target.checked);
-  });
+  const darkToggle = document.getElementById('settings-dark');
+  if (darkToggle) {
+    darkToggle.addEventListener('change', (e) => setDarkChrome(e.target.checked));
+  }
+  const nobgToggle = document.getElementById('settings-no-bg');
+  if (nobgToggle) {
+    nobgToggle.addEventListener('change', (e) => setNoCellBg(e.target.checked));
+  }
   ['settings-page-width', 'settings-page-height', 'settings-margin-top', 'settings-margin-bottom', 'settings-margin-left', 'settings-margin-right'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) {
