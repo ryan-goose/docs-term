@@ -56,18 +56,27 @@ npm install
 ```
 
 
-## Grok mode (inside docs-term)
+## Chat mode (Ollama free default)
 
-Left **document tabs**: **Terminal** ↔ **Grok**.
+Left **document tabs**: **Terminal** ↔ **Chat**.
 
-- **Grok** shows chat bubbles on the Docs page (short answers / English summarizing — not essays).
-- Needs an **xAI API key** (API ≠ SuperGrok website). Set via **Tools → Grok API key…**, env `XAI_API_KEY`, or `~/.config/docs-term/xai-api-key` (mode `600`).
-- Without a key, Grok UI loads but Send stays disabled until you add one.
+- **Chat** shows bubble messages on the Docs page (short answers / English summarizing — not essays). Same student-voice system prompt as before.
+- **Default provider: local [Ollama](https://ollama.com)** at `http://127.0.0.1:11434` (OpenAI-compatible `/v1/chat/completions`, with `/api/chat` fallback). No API key required.
+- Env overrides: `OLLAMA_HOST`, `OLLAMA_MODEL` (default prefers `llama3.2` from `/api/tags` when present).
+- Status UI: if Ollama is down, the tab shows a CTA (`ollama serve` / `ollama pull …`). **Check again** re-probes.
+- **Optional xAI**: Tools → **xAI API key…**, or env `XAI_API_KEY`, or `~/.config/docs-term/xai-api-key` (mode `600`). Used when Ollama is unavailable or when you request the xAI provider.
 
 ```bash
-# optional
+# free local path
+ollama serve
+ollama pull llama3.2
+
+# optional overrides
+export OLLAMA_HOST=http://127.0.0.1:11434
+export OLLAMA_MODEL=llama3.2
+
+# optional cloud fallback
 export XAI_API_KEY=xai-...
-# or paste in the app; file is written under ~/.config/docs-term/
 ```
 
 ## Highlight+ (themes & black prompt bar)
@@ -121,12 +130,12 @@ Prefs (theme, no-bg, dark chrome, page width/height/margins, layout-edit, pagele
 
 | Menu | Wired actions |
 | --- | --- |
-| **File** | New tab, New session, Open connection (SSH), Named sessions, Save session, Share, Download .txt, Export PDF/.docx, Rename, Page setup, Scrolling, Print, Close |
+| **File** | New tab, New session, Open connection (SSH), Named sessions, Save session, Share, Download .txt, Export PDF/.docx, Rename, Chat mode, Page setup, Scrolling, Print, Close |
 | **Edit** | Undo/Redo, Cut/Copy/Paste (smart), Select all, Find and replace, Bookmark last command |
-| **View** | Ruler, chrome, Full screen, Zoom, font size, Outline, Comments, Dark mode, Terminal appearance |
+| **View** | Ruler, chrome, Full screen, Zoom, font size, Outline, Comments, Terminal / Chat mode, Dark mode, Terminal appearance |
 | **Insert** | New line, Clear screen, Form feed, Comment, Bookmarks |
 | **Format** | Text / Size / Text color / Highlight, Clear formatting |
-| **Tools / Help** | About, Shortcuts, Terminal appearance, Bookmarks, SSH profiles, Page setup, Scrolling |
+| **Tools / Help** | About, Shortcuts, Terminal appearance, Bookmarks, SSH profiles, xAI API key (optional), Page setup, Scrolling |
 
 Unavailable Docs chrome items remain disabled or show a snackbar.
 
@@ -146,7 +155,7 @@ Source files:
 
 ## Stack
 
-- `express` static UI on port **3737** + JSON config API under `~/.config/docs-term`
+- `express` static UI on port **3737** + JSON config API under `~/.config/docs-term` + Chat proxy (`/api/chat` → Ollama, optional xAI)
 - `ws` WebSocket at `/pty`
 - `node-pty` per-connection shell
 - `@xterm/xterm` + `@xterm/addon-fit` in the page body
@@ -160,6 +169,7 @@ server.js                 HTTP + WebSocket PTY + /api/config
 public/index.html         Docs chrome + panels/modals
 public/styles.css
 public/app.js             xterm + menus + features + SGR bg filter
+public/chat.js            Chat tab (Ollama default + optional xAI)
 public/vendor/            copied from node_modules on npm install
 packaging/docs-term.desktop
 scripts/start-docs-term.sh

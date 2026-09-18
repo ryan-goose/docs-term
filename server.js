@@ -52,8 +52,16 @@ app.use(express.static(path.join(__dirname, 'public'), {
   },
 }));
 
-app.get('/health', (_req, res) => {
-  res.json({ ok: true, shell: SHELL, sessions, configDir: CONFIG_DIR, grokConfigured: Boolean(readXaiKey()) });
+app.get('/health', async (_req, res) => {
+  const ollama = await probeOllama();
+  res.json({
+    ok: true,
+    shell: SHELL,
+    sessions,
+    configDir: CONFIG_DIR,
+    ollama: { reachable: ollama.ok, model: ollama.model, host: OLLAMA_HOST },
+    xaiConfigured: Boolean(readXaiKey()),
+  });
 });
 
 app.get('/api/config/:name', (req, res) => {
@@ -111,7 +119,11 @@ const XAI_KEY_FILE = path.join(CONFIG_DIR, 'xai-api-key');
 const XAI_API_URL = process.env.XAI_API_URL || 'https://api.x.ai/v1/chat/completions';
 const XAI_MODEL = process.env.XAI_MODEL || 'grok-2-latest';
 
-const GROK_SYSTEM = `You are Grok helping a student inside a Docs-like terminal app.
+const OLLAMA_HOST = String(process.env.OLLAMA_HOST || 'http://127.0.0.1:11434').replace(/\/$/, '');
+const OLLAMA_MODEL_ENV = process.env.OLLAMA_MODEL ? String(process.env.OLLAMA_MODEL).trim() : '';
+const DEFAULT_OLLAMA_MODEL = 'llama3.2';
+
+const CHAT_SYSTEM = `You are a helpful tutor inside a Docs-like terminal app.
 Keep answers SHORT — a few sentences or a tight bullet list. Prefer summarizing and clarifying English over writing essays.
 Sound like a sharp classmate/tutor, not a corporate AI: natural voice, no filler ("Certainly!", "As an AI…"), no padded conclusions.
 If the ask is huge, give a crisp outline or the key points only and offer to go deeper on one part.`;
@@ -135,18 +147,202 @@ function maskKey(key) {
   return key.slice(0, 4) + '…' + key.slice(-4);
 }
 
-app.get('/api/grok/status', (_req, res) => {
-  const key = readXaiKey();
-  res.json({
-    ok: true,
-    configured: Boolean(key),
-    keyHint: maskKey(key),
-    model: XAI_MODEL,
-    source: process.env.XAI_API_KEY ? 'env' : key ? 'file' : null,
+function pickOllamaModel(models) {
+  const names = Array.isArray(models) ? models : [];
+  if (OLLAMA_MODEL_ENV) return OLLAMA_MODEL_ENV;
+  const exact = names.find((n) => n === DEFAULT_OLLAMA_MODEL || n.startsWith(DEFAULT_OLLAMA_MODEL + ':'));
+  if (exact) return exact;
+  const soft = names.find((n) => String(n).toLowerCase().includes('llama3.2'));
+  if (soft) return soft;
+  if (names.length) return names[0];
+  return DEFAULT_OLLAMA_MODEL;
+}
+
+async function probeOllama() {
+  try {
+    const r = await fetch(OLLAMA_HOST + '/api/tags', {
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!r.ok) {
+      return { ok: false, models: [], model: OLLAMA_MODEL_ENV || DEFAULT_OLLAMA_MODEL, error: 'http_' + r.status };
+    }
+    const data = await r.json();
+    const models = (data && Array.isArray(data.models) ? data.models : [])
+      .map((m) => (m && (m.name || m.model)) || null)
+      .filter(Boolean);
+    const model = pickOllamaModel(models);
+    return { ok: true, models, model };
+  } catch (err) {
+    return {
+      ok: false,
+      models: [],
+      model: OLLAMA_MODEL_ENV || DEFAULT_OLLAMA_MODEL,
+      error: String(err && err.message ? err.message : err),
+    };
+  }
+}
+
+function cleanChatMessages(body) {
+  const messages = Array.isArray(body && body.messages) ? body.messages : [];
+  return messages
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+    .map((m) => ({ role: m.role, content: m.content.slice(0, 8000) }))
+    .slice(-24);
+}
+
+async function chatViaOllama(cleaned, model) {
+  const payload = {
+    model: model || DEFAULT_OLLAMA_MODEL,
+    messages: [{ role: 'system', content: CHAT_SYSTEM }, ...cleaned],
+    temperature: 0.7,
+    max_tokens: 512,
+    stream: false,
+  };
+  // Prefer OpenAI-compatible endpoint; fall back to native /api/chat.
+  let r = await fetch(OLLAMA_HOST + '/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(120000),
   });
+  let text = await r.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { raw: text };
+  }
+  if (r.status === 404) {
+    const nativePayload = {
+      model: payload.model,
+      messages: payload.messages,
+      stream: false,
+      options: { temperature: 0.7, num_predict: 512 },
+    };
+    r = await fetch(OLLAMA_HOST + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(nativePayload),
+      signal: AbortSignal.timeout(120000),
+    });
+    text = await r.text();
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { raw: text };
+    }
+  }
+  if (!r.ok) {
+    const message =
+      (data && ((data.error && data.error.message) || data.error || data.message)) || text.slice(0, 400);
+    const err = new Error(String(message));
+    err.status = r.status;
+    err.code = 'ollama_error';
+    throw err;
+  }
+  let content =
+    data &&
+    data.choices &&
+    data.choices[0] &&
+    data.choices[0].message &&
+    data.choices[0].message.content;
+  if (!content && data && data.message && typeof data.message.content === 'string') {
+    content = data.message.content;
+  }
+  return { content: content || '', model: (data && data.model) || payload.model, provider: 'ollama' };
+}
+
+async function chatViaXai(cleaned, key) {
+  const payload = {
+    model: XAI_MODEL,
+    messages: [{ role: 'system', content: CHAT_SYSTEM }, ...cleaned],
+    temperature: 0.7,
+    max_tokens: 512,
+  };
+  const r = await fetch(XAI_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + key,
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(120000),
+  });
+  const text = await r.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { raw: text };
+  }
+  if (!r.ok) {
+    const message =
+      (data && ((data.error && data.error.message) || data.message)) || text.slice(0, 400);
+    const err = new Error(String(message));
+    err.status = r.status;
+    err.code = 'xai_error';
+    throw err;
+  }
+  const content =
+    data &&
+    data.choices &&
+    data.choices[0] &&
+    data.choices[0].message &&
+    data.choices[0].message.content;
+  return { content: content || '', model: (data && data.model) || XAI_MODEL, provider: 'xai' };
+}
+
+async function chatStatusPayload() {
+  const ollama = await probeOllama();
+  const key = readXaiKey();
+  const models = ollama.models || [];
+  const ollamaReady = Boolean(ollama.ok && (models.length > 0 || OLLAMA_MODEL_ENV));
+  const defaultProvider = ollamaReady ? 'ollama' : key ? 'xai' : null;
+  return {
+    ok: true,
+    configured: Boolean(ollamaReady || key),
+    ready: Boolean(ollamaReady || key),
+    defaultProvider,
+    ollama: {
+      reachable: ollama.ok,
+      ready: ollamaReady,
+      host: OLLAMA_HOST,
+      model: ollama.model,
+      models,
+      needsPull: Boolean(ollama.ok && !models.length && !OLLAMA_MODEL_ENV),
+      error: ollama.error || null,
+      pullHint: 'ollama pull ' + (ollama.model || DEFAULT_OLLAMA_MODEL),
+      serveHint: 'ollama serve',
+    },
+    xai: {
+      configured: Boolean(key),
+      keyHint: maskKey(key),
+      model: XAI_MODEL,
+      source: process.env.XAI_API_KEY ? 'env' : key ? 'file' : null,
+    },
+    // Back-compat fields for older UI
+    keyHint: maskKey(key),
+    model: ollama.ok ? ollama.model : XAI_MODEL,
+  };
+}
+
+app.get('/api/chat/status', async (_req, res) => {
+  try {
+    res.json(await chatStatusPayload());
+  } catch (err) {
+    res.status(500).json({ error: String(err && err.message ? err.message : err) });
+  }
+});
+// Back-compat alias
+app.get('/api/grok/status', async (_req, res) => {
+  try {
+    res.json(await chatStatusPayload());
+  } catch (err) {
+    res.status(500).json({ error: String(err && err.message ? err.message : err) });
+  }
 });
 
-app.put('/api/grok/key', (req, res) => {
+function saveXaiKeyHandler(req, res) {
   const key = String((req.body && req.body.key) || '').trim();
   if (!key || key.length < 8) {
     res.status(400).json({ error: 'API key looks too short' });
@@ -159,79 +355,93 @@ app.put('/api/grok/key', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: String(err && err.message ? err.message : err) });
   }
-});
+}
 
-app.delete('/api/grok/key', (_req, res) => {
+function deleteXaiKeyHandler(_req, res) {
   try {
     if (fs.existsSync(XAI_KEY_FILE)) fs.unlinkSync(XAI_KEY_FILE);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err && err.message ? err.message : err) });
   }
-});
+}
 
-app.post('/api/grok/chat', async (req, res) => {
-  const key = readXaiKey();
-  if (!key) {
-    res.status(401).json({
-      error: 'missing_key',
-      message: 'Add an xAI API key (Tools → Grok API key…). Web SuperGrok login is not the API.',
-    });
-    return;
-  }
-  const messages = Array.isArray(req.body && req.body.messages) ? req.body.messages : [];
-  const cleaned = messages
-    .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
-    .map((m) => ({ role: m.role, content: m.content.slice(0, 8000) }))
-    .slice(-24);
+app.put('/api/chat/key', saveXaiKeyHandler);
+app.put('/api/grok/key', saveXaiKeyHandler);
+app.delete('/api/chat/key', deleteXaiKeyHandler);
+app.delete('/api/grok/key', deleteXaiKeyHandler);
+
+async function chatHandler(req, res) {
+  const cleaned = cleanChatMessages(req.body);
   if (!cleaned.length) {
     res.status(400).json({ error: 'No messages' });
     return;
   }
-  const payload = {
-    model: XAI_MODEL,
-    messages: [{ role: 'system', content: GROK_SYSTEM }, ...cleaned],
-    temperature: 0.7,
-    max_tokens: 512,
-  };
-  try {
-    const r = await fetch(XAI_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + key,
-      },
-      body: JSON.stringify(payload),
+  const requested = String((req.body && req.body.provider) || '').toLowerCase();
+  const ollama = await probeOllama();
+  const key = readXaiKey();
+  const models = ollama.models || [];
+  const ollamaReady = Boolean(ollama.ok && (models.length > 0 || OLLAMA_MODEL_ENV));
+  let provider = requested === 'xai' || requested === 'ollama' ? requested : null;
+  if (!provider) provider = ollamaReady ? 'ollama' : key ? 'xai' : null;
+
+  if (!provider) {
+    const tip = ollama.ok
+      ? 'Ollama is up but no models found. Run `' +
+        'ollama pull ' +
+        (OLLAMA_MODEL_ENV || DEFAULT_OLLAMA_MODEL) +
+        '`.'
+      : 'Ollama is not reachable at ' +
+        OLLAMA_HOST +
+        '. Start it with `ollama serve`, then `ollama pull ' +
+        (OLLAMA_MODEL_ENV || DEFAULT_OLLAMA_MODEL) +
+        '`.';
+    res.status(503).json({
+      error: 'no_provider',
+      message: tip + ' Or add an optional xAI API key under Tools.',
+      ollama: { host: OLLAMA_HOST, reachable: ollama.ok, needsPull: Boolean(ollama.ok && !models.length) },
     });
-    const text = await r.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = { raw: text };
+    return;
+  }
+
+  try {
+    if (provider === 'ollama') {
+      if (!ollama.ok) {
+        res.status(503).json({
+          error: 'ollama_unreachable',
+          message:
+            'Cannot reach Ollama at ' +
+            OLLAMA_HOST +
+            '. Run `ollama serve` and `ollama pull ' +
+            (ollama.model || DEFAULT_OLLAMA_MODEL) +
+            '`.',
+        });
+        return;
+      }
+      const result = await chatViaOllama(cleaned, ollama.model);
+      res.json({ ok: true, ...result });
+      return;
     }
-    if (!r.ok) {
-      res.status(r.status).json({
-        error: 'xai_error',
-        message: (data && (data.error && data.error.message || data.message)) || text.slice(0, 400),
+    if (!key) {
+      res.status(401).json({
+        error: 'missing_key',
+        message: 'Add an xAI API key (Tools → xAI API key…). Optional — Ollama is the free default.',
       });
       return;
     }
-    const content =
-      data &&
-      data.choices &&
-      data.choices[0] &&
-      data.choices[0].message &&
-      data.choices[0].message.content;
-    res.json({
-      ok: true,
-      content: content || '',
-      model: data.model || XAI_MODEL,
-    });
+    const result = await chatViaXai(cleaned, key);
+    res.json({ ok: true, ...result });
   } catch (err) {
-    res.status(502).json({ error: 'proxy_failed', message: String(err && err.message ? err.message : err) });
+    const status = Number(err && err.status) || 502;
+    res.status(status).json({
+      error: (err && err.code) || 'proxy_failed',
+      message: String(err && err.message ? err.message : err),
+    });
   }
-});
+}
+
+app.post('/api/chat', chatHandler);
+app.post('/api/grok/chat', chatHandler);
 
 
 const server = http.createServer(app);

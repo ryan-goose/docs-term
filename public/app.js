@@ -2771,6 +2771,8 @@
       'comment-modal',
       'page-setup-modal',
       'scrolling-modal',
+      'chat-key-modal',
+      'grok-key-modal',
     ].forEach(hideModal);
     pendingPasteLines = [];
     pasteCursor = 0;
