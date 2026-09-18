@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Untitled document - Google Docs</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/vendor/xterm.css?v=outer-sb3">
-  <link rel="stylesheet" href="/styles.css?v=outer-sb3">
+  <link rel="stylesheet" href="/vendor/xterm.css?v=grok1">
+  <link rel="stylesheet" href="/styles.css?v=grok1">
 </head>
 <body>
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
@@ -153,6 +153,15 @@
   </div>
 
   <div class="workspace" id="workspace">
+    <aside class="doc-tabs" id="doc-tabs" aria-label="Document tabs">
+      <button type="button" class="doc-tab active" data-doc-tab="terminal" aria-selected="true" title="Terminal">
+        <span class="doc-tab-label">Terminal</span>
+      </button>
+      <button type="button" class="doc-tab" data-doc-tab="grok" aria-selected="false" title="Grok">
+        <span class="doc-tab-label">Grok</span>
+      </button>
+      <button type="button" class="doc-tab doc-tab-add" disabled title="Add tab (soon)">+</button>
+    </aside>
     <aside class="side-panel outline-panel" id="outline-panel" hidden>
       <div class="side-panel-head">
         <h3>Outline</h3>
@@ -174,6 +183,18 @@
         <div class="margin-guide margin-guide-right" id="margin-guide-right" title="Drag right margin"></div>
         <div class="page-body" id="page-body">
           <div id="terminal"></div>
+          <div id="grok-panel" class="grok-panel" hidden>
+            <div class="grok-key-banner" id="grok-key-banner">
+              <p>Grok needs an <strong>xAI API key</strong> (not SuperGrok web login).</p>
+              <button type="button" class="btn-filled" id="grok-open-key">Add API key</button>
+            </div>
+            <p class="grok-hint" id="grok-key-hint">Loading key status…</p>
+            <div class="grok-messages" id="grok-messages"></div>
+            <div class="grok-composer">
+              <textarea id="grok-input" class="grok-input" rows="2" placeholder="Ask for a short answer or English summary…" disabled></textarea>
+              <button type="button" class="btn-filled" id="grok-send" disabled>Send</button>
+            </div>
+          </div>
         </div>
       </div>
     </main>
@@ -203,6 +224,9 @@
   <button class="mi" type="button" data-action="export-docx"><span class="label">Export as .docx…</span></button>
   <div class="sep"></div>
   <button class="mi" type="button" data-action="rename-session"><span class="label">Rename</span></button>
+  <div class="sep"></div>
+  <button class="mi" type="button" data-action="mode-grok"><span class="label">Grok mode</span></button>
+  <button class="mi" type="button" data-action="grok-api-key"><span class="label">Grok API key…</span></button>
   <div class="sep"></div>
   <button class="mi" type="button" data-action="page-setup"><span class="label">Page setup</span></button>
   <button class="mi" type="button" data-action="scrolling"><span class="label">Scrolling</span></button>
@@ -236,6 +260,9 @@
   <div class="sep"></div>
   <button class="mi" type="button" data-action="toggle-outline"><span class="label">Show outline</span></button>
   <button class="mi" type="button" data-action="toggle-comments"><span class="label">Show comments</span></button>
+  <div class="sep"></div>
+  <button class="mi" type="button" data-action="mode-terminal"><span class="label">Terminal mode</span></button>
+  <button class="mi" type="button" data-action="mode-grok"><span class="label">Grok mode</span></button>
   <div class="sep"></div>
   <button class="mi" type="button" data-action="toggle-dark"><span class="label">Dark mode</span></button>
   <button class="mi" type="button" data-submenu="highlight"><span class="label">Terminal appearance</span><span class="arrow">▶</span></button>
@@ -573,10 +600,25 @@
   </div>
 </div>
 
+
+<div class="modal-back" id="grok-key-modal">
+  <div class="dialog" role="dialog" aria-labelledby="grok-key-title">
+    <h2 id="grok-key-title">xAI API key</h2>
+    <p class="find-note">Stored only in <code>~/.config/docs-term/xai-api-key</code> (or <code>XAI_API_KEY</code> env). SuperGrok website login is <strong>not</strong> the API.</p>
+    <label class="field-label" for="grok-key-input">API key</label>
+    <input class="share-field" id="grok-key-input" type="password" autocomplete="off" placeholder="xai-…">
+    <div class="dialog-actions">
+      <button class="btn-text" type="button" id="grok-key-cancel">Cancel</button>
+      <button class="btn-filled" type="button" id="grok-key-save">Save</button>
+    </div>
+  </div>
+</div>
+
 <div class="snackbar" id="snackbar"></div>
 
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/addon-fit.js"></script>
-<script src="/app.js?v=outer-sb3"></script>
+<script src="/app.js?v=grok1"></script>
+<script src="/grok.js?v=grok1"></script>
 </body>
 </html>

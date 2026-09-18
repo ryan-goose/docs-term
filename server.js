@@ -53,7 +53,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
 }));
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, shell: SHELL, sessions, configDir: CONFIG_DIR });
+  res.json({ ok: true, shell: SHELL, sessions, configDir: CONFIG_DIR, grokConfigured: Boolean(readXaiKey()) });
 });
 
 app.get('/api/config/:name', (req, res) => {
@@ -105,6 +105,134 @@ app.delete('/api/config/:name', (req, res) => {
     res.status(500).json({ error: String(err && err.message ? err.message : err) });
   }
 });
+
+
+const XAI_KEY_FILE = path.join(CONFIG_DIR, 'xai-api-key');
+const XAI_API_URL = process.env.XAI_API_URL || 'https://api.x.ai/v1/chat/completions';
+const XAI_MODEL = process.env.XAI_MODEL || 'grok-2-latest';
+
+const GROK_SYSTEM = `You are Grok helping a student inside a Docs-like terminal app.
+Keep answers SHORT — a few sentences or a tight bullet list. Prefer summarizing and clarifying English over writing essays.
+Sound like a sharp classmate/tutor, not a corporate AI: natural voice, no filler ("Certainly!", "As an AI…"), no padded conclusions.
+If the ask is huge, give a crisp outline or the key points only and offer to go deeper on one part.`;
+
+function readXaiKey() {
+  if (process.env.XAI_API_KEY && String(process.env.XAI_API_KEY).trim()) {
+    return String(process.env.XAI_API_KEY).trim();
+  }
+  try {
+    ensureConfigDir();
+    if (fs.existsSync(XAI_KEY_FILE)) {
+      return fs.readFileSync(XAI_KEY_FILE, 'utf8').trim();
+    }
+  } catch (_) {}
+  return '';
+}
+
+function maskKey(key) {
+  if (!key) return null;
+  if (key.length <= 8) return '********';
+  return key.slice(0, 4) + '…' + key.slice(-4);
+}
+
+app.get('/api/grok/status', (_req, res) => {
+  const key = readXaiKey();
+  res.json({
+    ok: true,
+    configured: Boolean(key),
+    keyHint: maskKey(key),
+    model: XAI_MODEL,
+    source: process.env.XAI_API_KEY ? 'env' : key ? 'file' : null,
+  });
+});
+
+app.put('/api/grok/key', (req, res) => {
+  const key = String((req.body && req.body.key) || '').trim();
+  if (!key || key.length < 8) {
+    res.status(400).json({ error: 'API key looks too short' });
+    return;
+  }
+  try {
+    ensureConfigDir();
+    fs.writeFileSync(XAI_KEY_FILE, key + '\n', { mode: 0o600 });
+    res.json({ ok: true, keyHint: maskKey(key) });
+  } catch (err) {
+    res.status(500).json({ error: String(err && err.message ? err.message : err) });
+  }
+});
+
+app.delete('/api/grok/key', (_req, res) => {
+  try {
+    if (fs.existsSync(XAI_KEY_FILE)) fs.unlinkSync(XAI_KEY_FILE);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err && err.message ? err.message : err) });
+  }
+});
+
+app.post('/api/grok/chat', async (req, res) => {
+  const key = readXaiKey();
+  if (!key) {
+    res.status(401).json({
+      error: 'missing_key',
+      message: 'Add an xAI API key (Tools → Grok API key…). Web SuperGrok login is not the API.',
+    });
+    return;
+  }
+  const messages = Array.isArray(req.body && req.body.messages) ? req.body.messages : [];
+  const cleaned = messages
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+    .map((m) => ({ role: m.role, content: m.content.slice(0, 8000) }))
+    .slice(-24);
+  if (!cleaned.length) {
+    res.status(400).json({ error: 'No messages' });
+    return;
+  }
+  const payload = {
+    model: XAI_MODEL,
+    messages: [{ role: 'system', content: GROK_SYSTEM }, ...cleaned],
+    temperature: 0.7,
+    max_tokens: 512,
+  };
+  try {
+    const r = await fetch(XAI_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + key,
+      },
+      body: JSON.stringify(payload),
+    });
+    const text = await r.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { raw: text };
+    }
+    if (!r.ok) {
+      res.status(r.status).json({
+        error: 'xai_error',
+        message: (data && (data.error && data.error.message || data.message)) || text.slice(0, 400),
+      });
+      return;
+    }
+    const content =
+      data &&
+      data.choices &&
+      data.choices[0] &&
+      data.choices[0].message &&
+      data.choices[0].message.content;
+    res.json({
+      ok: true,
+      content: content || '',
+      model: data.model || XAI_MODEL,
+    });
+  } catch (err) {
+    res.status(502).json({ error: 'proxy_failed', message: String(err && err.message ? err.message : err) });
+  }
+});
+
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/pty' });

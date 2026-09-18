@@ -1220,7 +1220,7 @@
   }
 
 
-  function snack(text) {
+  window.docsTermSnack = function snack(text) {
     const el = document.getElementById('snackbar');
     el.textContent = text;
     el.classList.add('show');
@@ -2934,4 +2934,12 @@
     term.focus();
   }, 30);
   document.getElementById('canvas').addEventListener('mousedown', () => term.focus());
+
+  window.docsTermOnShowTerminal = function () {
+    try {
+      requestAnimationFrame(sendResize);
+      term.focus();
+    } catch (_) {}
+  };
+
 })();

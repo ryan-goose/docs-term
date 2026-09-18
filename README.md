@@ -55,6 +55,21 @@ export npm_config_python=/usr/bin/python3
 npm install
 ```
 
+
+## Grok mode (inside docs-term)
+
+Left **document tabs**: **Terminal** ↔ **Grok**.
+
+- **Grok** shows chat bubbles on the Docs page (short answers / English summarizing — not essays).
+- Needs an **xAI API key** (API ≠ SuperGrok website). Set via **Tools → Grok API key…**, env `XAI_API_KEY`, or `~/.config/docs-term/xai-api-key` (mode `600`).
+- Without a key, Grok UI loads but Send stays disabled until you add one.
+
+```bash
+# optional
+export XAI_API_KEY=xai-...
+# or paste in the app; file is written under ~/.config/docs-term/
+```
+
 ## Highlight+ (themes & black prompt bar)
 
 Shell `PS1` often sets **cell background** with SGR (`\e[40m` … `47`, `48;…`, `100`–`107`). On the Docs-light white page, xterm paints those cells black → a black strip on the prompt.
