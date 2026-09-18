@@ -1277,6 +1277,9 @@ body.mode-terminal #grok-panel { display: none !important; }
   color: #174ea6;
   font-size: 13px;
 }
+.grok-key-banner[hidden] {
+  display: none !important;
+}
 body.dark-chrome .grok-key-banner { background: #303134; color: #8ab4f8; }
 .grok-hint { margin: 0; font-size: 12px; color: var(--docs-text-2, #5f6368); }
 .grok-messages {
